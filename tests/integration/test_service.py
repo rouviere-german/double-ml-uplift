@@ -233,6 +233,41 @@ def test_an_estimate_is_recorded_in_the_registry_it_reports(
     ]
 
 
+def test_a_deployment_salt_changes_the_folds_and_only_its_hash_leaves_the_process(
+    tmp_path: Path, analyst: dict[str, str]
+) -> None:
+    """The bundled fold salt is a public literal; a deployment can key it per environment.
+
+    Two services differing only in `APP_FOLD_SALT` must assign the same customers to different
+    folds, and the salt itself must never appear in a response.
+    """
+    digests = []
+    for salt in ("first-deployment-salt", "second-deployment-salt"):
+        settings = make_settings(tmp_path / salt, fold_salt=salt)
+        app = create_service_app(
+            bundled_spec("retention_offer"),
+            settings=settings,
+            config=CONFIG,
+            registry=CollectorRegistry(),
+        )
+        with TestClient(app, raise_server_exceptions=False) as scoped:
+            body = estimate(scoped, analyst).json()
+        digests.append((body["fold_digest"], body["config_sha256"], json.dumps(body)))
+
+    assert digests[0][0] != digests[1][0], "a different salt must move customers between folds"
+    assert digests[0][1] != digests[1][1], "the salt is part of what defines the configuration"
+    for _, _, document in digests:
+        assert "deployment-salt" not in document
+
+
+def test_without_a_deployment_salt_the_bundled_default_is_used(
+    client: TestClient, settings: Settings, analyst: dict[str, str]
+) -> None:
+    assert settings.fold_salt is None
+    body = estimate(client, analyst).json()
+    assert body["config_sha256"] == CONFIG.sha256()
+
+
 def test_a_cohort_below_the_minimum_is_refused(client: TestClient, analyst: dict[str, str]) -> None:
     response = client.post(
         "/v1/estimate", json={"rows": rows_payload(campaign())[:10]}, headers=analyst

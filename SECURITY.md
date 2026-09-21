@@ -30,5 +30,8 @@ upstream).
 - Every security claim is linked to evidence in [CLAIMS.md](CLAIMS.md).
 - CI runs ruff, mypy --strict, pytest with a coverage floor, bandit, semgrep (registry packs plus
   `.semgrep/rules.yml`), pip-audit, gitleaks, a trivy image scan and a syft CycloneDX SBOM.
-- Secrets come only from the environment; only `.env.example` is committed.
+- Secrets come only from the environment; only `.env.example` is committed. `APP_JWT_SECRET`,
+  `APP_CUSTOMER_ID_PEPPER` and `APP_FOLD_SALT` are `SecretStr`, so they never reach a log or a
+  `repr`; the bundled fold salt is a public default and should be replaced per environment when
+  fold assignment is adversarially relevant.
 - Artifacts use pickle-free formats (JSON, npz with `allow_pickle=False`).

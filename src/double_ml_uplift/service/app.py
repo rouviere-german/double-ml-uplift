@@ -498,9 +498,14 @@ def create_service_app(
     cfg = settings if settings is not None else get_settings()
     metrics_registry = registry if registry is not None else CollectorRegistry()
     data_dir = Path(cfg.data_dir)
+    estimation = config or EstimationConfig()
+    if cfg.fold_salt is not None:
+        # A deployment-specific salt makes fold assignment unpredictable to someone who can
+        # choose customer ids; the bundled default is a public literal. Only its hash escapes.
+        estimation = estimation.model_copy(update={"fold_salt": cfg.fold_salt.get_secret_value()})
     state = ServiceState(
         spec=spec,
-        config=config or EstimationConfig(),
+        config=estimation,
         settings=cfg,
         hasher=CustomerIdHasher.from_settings(cfg),
         audit=AuditLog(data_dir / "audit" / "exports.jsonl"),

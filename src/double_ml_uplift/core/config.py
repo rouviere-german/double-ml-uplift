@@ -82,6 +82,13 @@ class Settings(BaseSettings):
     fairness_max_disparity: float = Field(default=0.15, gt=0.0, le=1.0)
     approval_ttl_seconds: float = Field(default=900.0, gt=0, le=86_400.0)
 
+    # --- estimation ---
+    # Keys the cross-fitting fold hash. The bundled default is a public literal, which is fine
+    # for reproducibility and useless against an attacker who can choose customer ids and read
+    # this repository. Set it per environment when fold assignment is adversarially relevant.
+    # Only its digest leaves the process, inside config_sha256.
+    fold_salt: SecretStr | None = None
+
     # --- storage ---
     data_dir: Path = Path("var")
 

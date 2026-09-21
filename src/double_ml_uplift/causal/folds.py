@@ -8,9 +8,15 @@ function of ``(salt, unit_id)``:
     fold(unit) = int(blake2b(salt || 0x00 || unit, 8 bytes)) mod n_folds
 
 The digest of the whole assignment goes into the run manifest, so two runs that claim to be the
-same run can be compared without shipping the assignment itself. Because the hash is keyed by the
-salt, an attacker who can choose customer ids cannot steer them into a chosen fold without
-knowing it.
+same run can be compared without shipping the assignment itself.
+
+The salt keys the hash, so an attacker who can choose customer ids cannot steer them into a
+chosen fold *unless the salt is known*. The bundled default is the literal ``"retention-offer"``
+(``EstimationConfig.fold_salt``): it is committed to this repository and its digest is returned
+in every ``/v1/estimate`` response, so at the default setting the keying buys reproducibility,
+not unpredictability. Where fold assignment is adversarially relevant, set ``APP_FOLD_SALT`` to a
+per-environment secret; the service passes it through to the estimation configuration, and only
+its hash ever leaves the process.
 """
 
 from __future__ import annotations
