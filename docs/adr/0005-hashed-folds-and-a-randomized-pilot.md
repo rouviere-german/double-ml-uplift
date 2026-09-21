@@ -79,8 +79,16 @@ use it:
    At a 20% budget the pilot interval covers the true policy value in 100% of draws.
 
 When the slice is too thin to support either — fewer than `min_pilot_per_arm` rows in the smaller
-arm, or fewer than five targeted rows per arm — the refuter reports `skipped` and the value is
-simply absent. Neither is estimated from a handful of rows.
+arm, or fewer than five targeted rows per arm — the refuter reports `status: "skipped"` and the
+value is simply absent. Neither is estimated from a handful of rows.
+
+`skipped` is a real third state, not a pass. `RefutationResult.status` is one of `passed`,
+`failed` or `skipped`; `RefutationReport.passed` is true only when *every blocking refuter ran and
+passed*, and `RefutationReport.skipped` names the ones that did not run. A report whose only
+external check never ran therefore answers `"passed": false, "flagged": [], "skipped":
+["pilot_consistency"]` — unchecked, which is not the same as contradicted and not the same as
+clean. Collapsing the three into a boolean would be the fail-open behaviour ADR 0002 exists to
+forbid.
 
 ## Consequences
 
@@ -90,8 +98,9 @@ claim is therefore "we detect strong unmeasured confounding 92% of the time *whe
 slice exists*", which is a much more defensible sentence than "the refuters passed".
 
 **Bad, and this is the largest residual risk in the repository.** Without a randomized slice there
-is no external check at all. `pilot_consistency` skips silently, the E-value is advisory, and the
-remaining refuters cannot see confounding by construction. A deployment on purely observational
+is no external check at all. `pilot_consistency` skips — visibly, in `skipped`, and without
+granting a pass — the E-value is advisory, and the remaining refuters cannot see confounding by
+construction. A deployment on purely observational
 history is therefore strictly weaker than the evaluation suggests, and the model card says so.
 
 **Bad.** The pilot costs money: a fraction of customers get the offer at random, including

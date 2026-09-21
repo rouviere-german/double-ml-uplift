@@ -185,7 +185,8 @@ attribute (see Ethical considerations).
 
 - **Run a randomized holdout.** It is the only thing in this system that can detect unobserved
   confounding, the only assumption that cannot be checked from the data. Without one, the
-  `pilot_consistency` refuter silently skips and the E-value is all that remains.
+  `pilot_consistency` refuter reports `skipped`, the refutation report withholds its pass
+  (`"passed": false` with an empty `flagged`), and the E-value is all that remains.
 - **Read the refusals as information, not as an obstacle.** "Not estimable" means the historical
   data cannot answer the question; the fix is an experiment, not a different estimator.
 - **Do not read a per-customer uplift as that customer's effect.** No data ever reveals an

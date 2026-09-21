@@ -196,6 +196,7 @@ def test_the_pilot_check_catches_an_observational_estimate_that_is_far_off() -> 
 
 
 def test_a_pilot_slice_that_is_too_small_is_skipped_rather_than_guessed() -> None:
+    """A refuter that never ran must not report itself as a refuter that ran and passed."""
     n = 200
     rng = np.random.default_rng(12)
     treatment = rng.binomial(1, 0.5, size=n).astype(np.int64)
@@ -205,9 +206,55 @@ def test_a_pilot_slice_that_is_too_small_is_skipped_rather_than_guessed() -> Non
     result = pilot_consistency(
         naive_difference(treatment, outcome), treatment, outcome, pilot, RefutationPolicy()
     )
-    assert result.passed
+    assert result.status == "skipped"
+    assert not result.passed
+    assert not result.failed
     assert result.detail.startswith("skipped")
     assert result.statistic == 0.0
+    assert result.to_dict()["status"] == "skipped"
+
+
+def test_a_report_whose_blocking_refuter_was_skipped_does_not_claim_to_have_passed() -> None:
+    """Fail open is the one thing this repository refuses to do.
+
+    ``passed`` means "every blocking refuter ran and passed". A skipped blocking refuter is not
+    a failure -- nothing contradicted the estimate -- but it is not a pass either, and a caller
+    reading the JSON must be able to tell the two apart without parsing free text.
+    """
+    skipped = RefutationResult(
+        name="pilot_consistency",
+        status="skipped",
+        statistic=0.0,
+        threshold=2.5,
+        detail="skipped: the randomized slice has only 3 rows in its smaller arm (minimum 25)",
+    )
+    report = RefutationReport(
+        results=(skipped,), e_value=EValue(risk_ratio=1.0, point=1.0, ci_limit=1.0)
+    )
+    assert report.skipped == ("pilot_consistency",)
+    assert report.flagged == ()
+    assert not report.passed
+    document = report.to_dict()
+    assert document["passed"] is False
+    assert document["skipped"] == ["pilot_consistency"]
+    assert document["flagged"] == []
+
+
+def test_a_skipped_advisory_refuter_does_not_withhold_the_pass() -> None:
+    """Only blocking refuters are load-bearing; an advisory that could not run is not a gap."""
+    skipped = RefutationResult(
+        name="e_value",
+        status="skipped",
+        statistic=0.0,
+        threshold=2.0,
+        detail="skipped",
+        severity="advisory",
+    )
+    report = RefutationReport(
+        results=(skipped,), e_value=EValue(risk_ratio=1.0, point=1.0, ci_limit=1.0)
+    )
+    assert report.skipped == ("e_value",)
+    assert report.passed
 
 
 # --- E-values ------------------------------------------------------------------------------------
@@ -362,10 +409,15 @@ def test_without_a_pilot_the_suite_runs_the_other_four() -> None:
 
 def test_an_advisory_failure_does_not_block_but_is_reported() -> None:
     advisory = RefutationResult(
-        name="e_value", passed=False, statistic=1.0, threshold=2.0, detail="", severity="advisory"
+        name="e_value",
+        status="failed",
+        statistic=1.0,
+        threshold=2.0,
+        detail="",
+        severity="advisory",
     )
     blocking = RefutationResult(
-        name="placebo_treatment", passed=False, statistic=9.0, threshold=2.0, detail=""
+        name="placebo_treatment", status="failed", statistic=9.0, threshold=2.0, detail=""
     )
     only_advisory = RefutationReport(
         results=(advisory,), e_value=EValue(risk_ratio=1.0, point=1.0, ci_limit=1.0)

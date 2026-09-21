@@ -148,7 +148,7 @@ def study_refuters(replications: int, detection_replications: int, rows: int) ->
         result = _fit(campaign, config)
         assert result.refutation is not None
         for item in result.refutation.results:
-            flags[item.name] = flags.get(item.name, 0) + int(not item.passed)
+            flags[item.name] = flags.get(item.name, 0) + int(item.failed)
 
     detected = 0
     biases: list[float] = []
@@ -157,7 +157,7 @@ def study_refuters(replications: int, detection_replications: int, rows: int) ->
         result = _fit(campaign, config)
         assert result.refutation is not None
         pilot = next(item for item in result.refutation.results if item.name == "pilot_consistency")
-        detected += int(not pilot.passed)
+        detected += int(pilot.failed)
         biases.append(result.primary.ate - campaign.true_ate)
     return {
         "false_flag_rate": {

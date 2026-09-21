@@ -114,9 +114,10 @@ def _hidden_confounder(spec: CausalSpec) -> dict[str, Any]:
         "true_ate": round(campaign.true_ate, 3),
         "reported_ate": round(result.primary.ate, 3),
         "gates_passed": result.diagnostics.estimable,
-        "pilot_consistency_flagged": not pilot.passed,
+        "pilot_consistency_flagged": pilot.failed,
         "pilot_detail": pilot.detail,
         "flagged": list(result.refutation.flagged) if result.refutation else [],
+        "skipped": list(result.refutation.skipped) if result.refutation else [],
     }
 
 

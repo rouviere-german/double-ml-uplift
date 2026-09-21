@@ -28,6 +28,13 @@ have if the assumptions hold, and reports when that consequence does not hold:
     research: introducing the E-value", *Annals of Internal Medicine* 167, 2017). Continuous
     outcomes are converted with the approximation ``RR ~ exp(0.91 * d)`` for a standardised mean
     difference ``d``, as recommended in the same paper.
+
+A refuter has three outcomes, not two. ``passed`` means it ran and found nothing, ``failed``
+means it ran and contradicted the estimate, and ``skipped`` means it could not run at all -- the
+randomized slice is too thin, for instance. Collapsing ``skipped`` into ``passed`` would be fail
+open, which is exactly what ADR 0002 forbids, so ``RefutationReport.passed`` is true only when
+every *blocking* refuter actually ran and passed, and the names of the ones that did not run are
+reported separately in ``skipped``.
 """
 
 from __future__ import annotations
@@ -89,6 +96,7 @@ class RefutationPolicy(BaseModel):
 
 
 Severity = Literal["blocking", "advisory"]
+Status = Literal["passed", "failed", "skipped"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,15 +111,47 @@ class RefutationResult:
     """
 
     name: str
-    passed: bool
+    status: Status
     statistic: float
     threshold: float
     detail: str
     severity: Severity = "blocking"
 
+    @property
+    def passed(self) -> bool:
+        """True only when the refuter ran and found nothing. A skipped refuter is not a pass."""
+        return self.status == "passed"
+
+    @property
+    def failed(self) -> bool:
+        """True only when the refuter ran and contradicted the estimate."""
+        return self.status == "failed"
+
+    @classmethod
+    def verdict(
+        cls,
+        name: str,
+        *,
+        ok: bool,
+        statistic: float,
+        threshold: float,
+        detail: str,
+        severity: Severity = "blocking",
+    ) -> RefutationResult:
+        """Build the result of a refuter that actually ran."""
+        return cls(
+            name=name,
+            status="passed" if ok else "failed",
+            statistic=statistic,
+            threshold=threshold,
+            detail=detail,
+            severity=severity,
+        )
+
     def to_dict(self) -> dict[str, object]:
         return {
             "name": self.name,
+            "status": self.status,
             "passed": self.passed,
             "severity": self.severity,
             "statistic": round(self.statistic, 6),
@@ -143,25 +183,40 @@ class RefutationReport:
 
     @property
     def flagged(self) -> tuple[str, ...]:
-        """Blocking refuters that failed. An empty tuple means nothing contradicted the estimate."""
+        """Blocking refuters that ran and failed. Empty means nothing contradicted the estimate."""
         return tuple(
-            item.name for item in self.results if not item.passed and item.severity == "blocking"
+            item.name for item in self.results if item.failed and item.severity == "blocking"
         )
 
     @property
     def advisories(self) -> tuple[str, ...]:
         return tuple(
-            item.name for item in self.results if not item.passed and item.severity == "advisory"
+            item.name for item in self.results if item.failed and item.severity == "advisory"
         )
 
     @property
+    def skipped(self) -> tuple[str, ...]:
+        """Refuters that could not run at all, blocking or advisory."""
+        return tuple(item.name for item in self.results if item.status == "skipped")
+
+    @property
     def passed(self) -> bool:
-        return not self.flagged
+        """Every blocking refuter ran and passed.
+
+        A blocking refuter that could not run leaves the estimate unchecked in the one way that
+        refuter existed to check, so it withholds the pass rather than granting it. Callers that
+        want to distinguish "contradicted" from "unchecked" read ``flagged`` and ``skipped``.
+        """
+        blocking_skipped = any(
+            item.status == "skipped" and item.severity == "blocking" for item in self.results
+        )
+        return not self.flagged and not blocking_skipped
 
     def to_dict(self) -> dict[str, object]:
         return {
             "passed": self.passed,
             "flagged": list(self.flagged),
+            "skipped": list(self.skipped),
             "advisories": list(self.advisories),
             "results": [item.to_dict() for item in self.results],
             "e_value": self.e_value.to_dict(),
@@ -215,9 +270,9 @@ def placebo_treatment(
     estimate = refit(features, permuted, outcome, unit_ids)
     z = abs(estimate.ate) / estimate.se if estimate.se > 0 else math.inf
     passed = estimate.covers(0.0)
-    return RefutationResult(
-        name="placebo_treatment",
-        passed=passed,
+    return RefutationResult.verdict(
+        "placebo_treatment",
+        ok=passed,
         statistic=float(z),
         threshold=float(abs(estimate.ate - estimate.ci_low) / estimate.se if estimate.se else 0.0),
         detail=(
@@ -244,9 +299,9 @@ def random_common_cause(
     estimate = refit(augmented, treatment, outcome, unit_ids)
     scale = baseline.se if baseline.se > 0 else math.inf
     z = abs(estimate.ate - baseline.ate) / scale
-    return RefutationResult(
-        name="random_common_cause",
-        passed=bool(z <= policy.random_common_cause_z),
+    return RefutationResult.verdict(
+        "random_common_cause",
+        ok=bool(z <= policy.random_common_cause_z),
         statistic=float(z),
         threshold=policy.random_common_cause_z,
         detail=f"estimate moved from {baseline.ate:.3f} to {estimate.ate:.3f}",
@@ -283,9 +338,9 @@ def subset_stability(
         if z > worst:
             worst = z
             worst_detail = f"subset of {size} rows estimated {estimate.ate:.3f} (z = {z:.2f})"
-    return RefutationResult(
-        name="subset_stability",
-        passed=bool(worst <= policy.subset_stability_z),
+    return RefutationResult.verdict(
+        "subset_stability",
+        ok=bool(worst <= policy.subset_stability_z),
         statistic=float(worst),
         threshold=policy.subset_stability_z,
         detail=worst_detail,
@@ -306,7 +361,7 @@ def pilot_consistency(
     if per_arm < policy.min_pilot_per_arm:
         return RefutationResult(
             name="pilot_consistency",
-            passed=True,
+            status="skipped",
             statistic=0.0,
             threshold=policy.pilot_consistency_z,
             detail=(
@@ -317,9 +372,9 @@ def pilot_consistency(
     pilot_estimate = naive_difference(pilot_treatment, outcome[rows], level=baseline.level)
     scale = math.sqrt(baseline.se**2 + pilot_estimate.se**2)
     z = abs(baseline.ate - pilot_estimate.ate) / scale if scale > 0 else math.inf
-    return RefutationResult(
-        name="pilot_consistency",
-        passed=bool(z <= policy.pilot_consistency_z),
+    return RefutationResult.verdict(
+        "pilot_consistency",
+        ok=bool(z <= policy.pilot_consistency_z),
         statistic=float(z),
         threshold=policy.pilot_consistency_z,
         detail=(
@@ -355,9 +410,9 @@ def refute_all(
         results.append(pilot_consistency(baseline, treatment, outcome, pilot, policy))
     value = e_value(baseline, float(np.std(outcome, ddof=1)))
     results.append(
-        RefutationResult(
-            name="e_value",
-            passed=bool(value.ci_limit >= policy.min_e_value),
+        RefutationResult.verdict(
+            "e_value",
+            ok=bool(value.ci_limit >= policy.min_e_value),
             statistic=value.ci_limit,
             threshold=policy.min_e_value,
             severity="advisory",

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -237,6 +239,36 @@ def test_an_unmeasured_confounder_is_caught_by_the_pilot(spec: CausalSpec) -> No
     pilot = next(item for item in result.refutation.results if item.name == "pilot_consistency")
     assert not pilot.passed
     assert "pilot_consistency" in result.refutation.flagged
+    assert abs(result.primary.ate - campaign.true_ate) > 20.0
+
+
+def test_a_pilot_too_thin_to_run_withholds_the_pass_instead_of_granting_it(
+    spec: CausalSpec,
+) -> None:
+    """The fail-open case: confounded data, no usable pilot, and nothing else can see it.
+
+    ``pilot_consistency`` is the only refuter that can detect unmeasured confounding. When the
+    randomized slice is too thin it cannot run, and the report must say so rather than report a
+    clean bill of health it never checked.
+    """
+    config = load_scenario("hidden_confounder", n_customers=1_200, seed=4242).model_copy(
+        update={"pilot_fraction": 0.01}
+    )
+    campaign = simulate_campaign(config)
+    result = UpliftEngine(spec, FAST.model_copy(update={"run_refuters": True})).fit(campaign.frame)
+
+    assert result.refutation is not None
+    pilot = next(item for item in result.refutation.results if item.name == "pilot_consistency")
+    assert pilot.status == "skipped"
+    assert result.refutation.skipped == ("pilot_consistency",)
+    assert result.refutation.flagged == ()
+    assert result.refutation.passed is False
+
+    document = result.refutation.to_dict()
+    assert document["passed"] is False
+    assert document["skipped"] == ["pilot_consistency"]
+    json.dumps(document, allow_nan=False)
+    # The estimate itself is badly wrong, which is exactly why the pass is withheld.
     assert abs(result.primary.ate - campaign.true_ate) > 20.0
 
 
