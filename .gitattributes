@@ -1,0 +1,6 @@
+# Text files are stored and checked out with LF, whatever core.autocrlf says locally.
+# The Dockerfile copies this tree into a Linux image and CI runs it on Linux, so a CRLF
+# checkout on Windows would otherwise change what ships.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
