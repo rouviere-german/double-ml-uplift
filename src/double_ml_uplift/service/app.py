@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import numpy as np
 import numpy.typing as npt
@@ -118,6 +118,12 @@ class ServiceState:
         if self.bundle is None:
             raise AppError(409, "no_estimate", "Run an estimation before scoring or targeting.")
         return self.bundle
+
+
+def _refuse_approval(state: ServiceState, message: str) -> NoReturn:
+    """Every approval failure leaves by the same door: counted, and answered with 409."""
+    state.metrics.refuse("approval")
+    raise AppError(409, "approval_refused", message) from None
 
 
 def _state(request: Request) -> ServiceState:
@@ -366,8 +372,7 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
         try:
             record = state.approvals.decide(request_id, principal.subject, approve=body.approve)
         except ApprovalError as exc:
-            state.metrics.refuse("approval")
-            raise AppError(409, "approval_refused", str(exc)) from None
+            _refuse_approval(state, str(exc))
         state.audit.append(
             principal.subject,
             "export_decision",
@@ -384,18 +389,19 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
         outcome, requested = state.targeting, state.targeting_request
         if outcome is None or requested is None:
             raise AppError(409, "no_targeting_plan", "Request an export before releasing one.")
-        record = state.approvals.get(body.request_id)
         payload = _payload(state, result, outcome.plans[requested.ranking].selected, requested)
+        try:
+            # ``get`` refuses an id the store never issued. It belongs under the same handler as
+            # every other approval failure: a refusal, never an unhandled 500.
+            record = state.approvals.get(body.request_id)
+        except ApprovalError as exc:
+            _refuse_approval(state, str(exc))
         if payload_digest(payload) != record.payload_sha256:
-            state.metrics.refuse("approval")
-            raise AppError(
-                409, "approval_refused", "The current targeting plan does not match the approval."
-            )
+            _refuse_approval(state, "The current targeting plan does not match the approval.")
         try:
             state.approvals.consume(body.request_id, principal.subject, payload)
         except ApprovalError as exc:
-            state.metrics.refuse("approval")
-            raise AppError(409, "approval_refused", str(exc)) from None
+            _refuse_approval(state, str(exc))
         state.metrics.exports_total.inc()
         state.audit.append(
             principal.subject,

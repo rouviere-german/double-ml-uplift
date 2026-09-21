@@ -655,3 +655,16 @@ def test_the_fairness_check_is_computed_on_the_ranking_being_released(
     assert blocked[0]["data"]["ranking"] == "propensity"
     assert blocked[0]["data"]["disparity"] > 0.04
 
+
+def test_releasing_an_unknown_request_id_is_refused_not_a_server_error(
+    client: TestClient, analyst: dict[str, str], operator: dict[str, str]
+) -> None:
+    """A well-formed id that the store never issued is an approval refusal, like every sibling."""
+    assert estimate(client, analyst).status_code == 200
+    assert request_export(client, operator).status_code == 200
+    response = client.post(
+        "/v1/targeting/export", json={"request_id": "exp_" + "0" * 32}, headers=operator
+    )
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "approval_refused"
+    assert "unknown export request" in response.json()["error"]["message"]
