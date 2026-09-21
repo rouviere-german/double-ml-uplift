@@ -1,0 +1,41 @@
+# Local stack. Only locally built images; nothing is pulled at runtime besides the pinned bases.
+services:
+  app:
+    build:
+      context: .
+    image: double-ml-uplift:local
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      APP_ENVIRONMENT: prod
+      APP_LOG_LEVEL: INFO
+      # Comma-separated SHA-256 digests; generate with `uv run double-ml-uplift generate-api-key`.
+      # Guards /metrics. The /v1 routes use JWT roles instead.
+      APP_API_KEY_SHA256: ${APP_API_KEY_SHA256:-}
+      # HS256 key shared with whatever mints analyst/operator tokens. Unset means every
+      # role-protected route fails closed and /readyz reports not ready.
+      APP_JWT_SECRET: ${APP_JWT_SECRET:-}
+      # HMAC key for pseudonymising customer ids. The service refuses to start without it.
+      APP_CUSTOMER_ID_PEPPER: ${APP_CUSTOMER_ID_PEPPER:?set APP_CUSTOMER_ID_PEPPER}
+      # The approval store and the hash-chained audit log live here. It is the one path the
+      # container writes to, so it is a volume rather than the tmpfs: an audit chain that
+      # disappears with the container is not an audit chain.
+      APP_DATA_DIR: /data
+    volumes:
+      - audit:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    # Cross-fitting four nuisance models over an upload at the default 200k row cap needs
+    # noticeably more than the baseline 256m. Lower APP_MAX_UPLOAD_ROWS if you lower this.
+    mem_limit: 1g
+    cpus: 2.0
+    restart: unless-stopped
+
+volumes:
+  audit:

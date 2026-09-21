@@ -1,0 +1,142 @@
+[project]
+name = "double-ml-uplift"
+version = "0.1.0"
+description = "Cross-fitted double machine learning for retention uplift, gated by identification, overlap and refutation checks that refuse to report a number."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Rouviere German" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    # --- core (every repo) ---
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.7",
+    "structlog>=24.4",
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "prometheus-client>=0.21",
+    # --- ml kit ---
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "pandera[pandas]>=0.24",
+    # --- causal estimation ---
+    "scikit-learn>=1.5",
+    "lightgbm>=4.5",
+    "scipy>=1.14",
+    "statsmodels>=0.14",
+    "networkx>=3.3",
+    "pyyaml>=6.0",
+    # --- service auth ---
+    "pyjwt>=2.9",
+]
+
+[project.scripts]
+double-ml-uplift = "double_ml_uplift.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "hypothesis>=6.115",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
+    "types-pyyaml>=6.0",
+    "scipy-stubs>=1.14",
+    "bandit[toml]>=1.8",
+]
+
+[build-system]
+requires = ["uv_build>=0.8,<0.13"]
+build-backend = "uv_build"
+
+# Baseline metadata consumed by scripts/check_baseline.py.
+# kind: "template" (both kits), "agentic" or "ml".
+[tool.portfolio]
+kind = "ml"
+package = "double_ml_uplift"
+
+# pip-audit has no native config file; tasks.py and CI read this list.
+# Every entry needs a justification and a review date.
+[tool.portfolio.audit]
+ignore_vulns = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests", "scripts", "bench"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "B", "UP", "S", "N", "SIM", "C4", "RUF", "PT", "PL", "TRY", "BLE", "DTZ", "T20",
+]
+ignore = [
+    "PLR0913",  # explicit keyword-heavy constructors are fine
+    "PLR0917",  # ditto for positional ones: the refuters take (refit, X, T, Y, ids, baseline, policy)
+    "PLR2004",  # magic numbers in tests and thresholds
+    "TRY003",   # messages in exception constructors are fine
+    "TRY004",   # pydantic validators must raise ValueError, not TypeError, for a bad type
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "PLR2004", "PLC0415", "S603"]
+"scripts/**" = ["T201"]
+"bench/**" = ["T201", "S311", "S101"]
+"tasks.py" = ["T201", "S603", "S607"]
+"src/double_ml_uplift/cli.py" = ["T201"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src", "tests", "scripts", "bench", "tasks.py"]
+plugins = ["pydantic.mypy"]
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# Scientific stack without bundled type information. The wrappers in
+# src/double_ml_uplift/causal/nuisance.py keep the untyped surface small and typed at the edges.
+module = [
+    "lightgbm",
+    "lightgbm.*",
+    "sklearn",
+    "sklearn.*",
+    "statsmodels",
+    "statsmodels.*",
+    "networkx",
+    "networkx.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = [
+    "unit: fast, isolated tests with no I/O beyond tmp_path",
+    "integration: tests that wire several components (app, files, CLI) together",
+]
+filterwarnings = ["error::DeprecationWarning:double_ml_uplift.*"]
+
+[tool.coverage.run]
+source = ["double_ml_uplift"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "\\.\\.\\.$",
+]
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+skips = []
