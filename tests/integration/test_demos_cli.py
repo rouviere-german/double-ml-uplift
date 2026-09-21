@@ -92,7 +92,8 @@ def test_the_demo_shows_uplift_targeting_beating_the_alternatives(
     assert policies["uplift"]["true_value"] > policies["treat_all"]["true_value"]
     for policy in policies.values():
         assert policy["pilot_ci_covers_true_value"] is True
-    assert demo["targeting"]["fairness"]["blocked"] is False
+    assert set(demo["targeting"]["fairness"]) == set(demo["targeting"]["policies"])
+    assert all(check["blocked"] is False for check in demo["targeting"]["fairness"].values())
 
 
 def test_the_demo_holds_the_targeting_list_for_a_second_operator(

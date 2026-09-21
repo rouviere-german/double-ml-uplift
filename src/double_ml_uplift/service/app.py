@@ -313,6 +313,8 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
         state.targeting = outcome
         state.targeting_request = body
         plan = outcome.plans[body.ranking]
+        # The list being released is the list being judged: read this ranking's own check.
+        fairness = outcome.fairness[body.ranking]
         if plan.n_selected < state.settings.min_cohort_size:
             state.metrics.refuse("cohort_too_small")
             raise AppError(
@@ -320,12 +322,12 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
                 "cohort_too_small",
                 f"A targeting list needs at least {state.settings.min_cohort_size} customers.",
             )
-        if outcome.fairness.blocked:
+        if fairness.blocked:
             state.metrics.refuse("fairness")
             state.audit.append(
                 principal.subject,
                 "export_blocked_by_fairness",
-                {"disparity": round(outcome.fairness.disparity, 6), "ranking": body.ranking},
+                {"disparity": round(fairness.disparity, 6), "ranking": body.ranking},
             )
             raise AppError(
                 422,
@@ -351,7 +353,7 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
             payload_sha256=record.payload_sha256,
             n_selected=plan.n_selected,
             expires_at=record.expires_at,
-            fairness=outcome.fairness.to_dict(),
+            fairness=fairness.to_dict(),
             pilot_value=pilot.to_dict() if pilot else None,
             audit_head=state.audit.head,
         )

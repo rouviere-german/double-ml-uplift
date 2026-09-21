@@ -21,7 +21,7 @@ from double_ml_uplift.causal.nuisance import NuisanceConfig
 from double_ml_uplift.causal.scenarios import load_scenario
 from double_ml_uplift.causal.scm import SimulatedCampaign, simulate_campaign
 from double_ml_uplift.causal.spec import CausalSpec, NodeSpec, bundled_spec
-from double_ml_uplift.causal.targeting import true_policy_value
+from double_ml_uplift.causal.targeting import allocation_disparity, true_policy_value
 from double_ml_uplift.ml.contracts import (
     ContractLimits,
     DataContractError,
@@ -263,7 +263,7 @@ def test_uplift_targeting_beats_propensity_targeting_in_true_value(
     assert truths["uplift"] > truths["treat_all"]
     assert outcome.pilot_values["uplift"].covers(truths["uplift"])
     assert outcome.plans["uplift"].n_selected <= int(0.2 * confounded.frame.shape[0]) + 1
-    assert not outcome.fairness.blocked
+    assert not outcome.fairness["uplift"].blocked
     assert outcome.to_dict()["budget"] == pytest.approx(0.2 * ROWS)
 
 
@@ -295,8 +295,30 @@ def test_a_disparate_allocation_is_blocked_at_the_release_threshold(
 ) -> None:
     engine = UpliftEngine(spec, FAST)
     outcome = engine.target(fitted, budget_fraction=0.2, fairness_threshold=1e-6)
-    assert outcome.fairness.blocked
-    assert outcome.fairness.disparity > 0.0
+    assert outcome.fairness["uplift"].blocked
+    assert outcome.fairness["uplift"].disparity > 0.0
+
+
+def test_every_plan_carries_its_own_fairness_check(
+    spec: CausalSpec, fitted: EstimationResult
+) -> None:
+    """Each ranking selects a different list, so each needs its own disparity.
+
+    One check computed on the uplift list says nothing about the propensity list, and the
+    service releases whichever list the operator asked for.
+    """
+    engine = UpliftEngine(spec, FAST)
+    outcome = engine.target(fitted, budget_fraction=0.2, fairness_threshold=0.5)
+    protected = fitted.prepared.protected
+    assert protected is not None
+    assert set(outcome.fairness) == set(outcome.plans)
+    for name, check in outcome.fairness.items():
+        expected = allocation_disparity(outcome.plans[name].selected, protected)
+        assert check.disparity == pytest.approx(expected[0])
+    assert outcome.fairness["uplift"].disparity != outcome.fairness["propensity"].disparity
+    document = outcome.to_dict()["fairness"]
+    assert isinstance(document, dict)
+    assert set(document) == set(outcome.plans)
 
 
 # --- serving --------------------------------------------------------------------------------------

@@ -150,13 +150,19 @@ class PreparedData:
 
 @dataclass(frozen=True, slots=True)
 class TargetingOutcome:
-    """Competing targeting policies and what the randomized pilot says each one is worth."""
+    """Competing targeting policies and what the randomized pilot says each one is worth.
+
+    ``plans``, ``pilot_values`` and ``fairness`` are keyed alike, because each ranking selects a
+    different list of customers and therefore has its own value and its own allocation disparity.
+    A caller that releases one list must read that list's entry: the disparity of the uplift list
+    says nothing about the disparity of the propensity list.
+    """
 
     budget: float
     cost_per_offer: float
     plans: dict[str, TargetingPlan]
     pilot_values: dict[str, PolicyValue]
-    fairness: FairnessCheck
+    fairness: dict[str, FairnessCheck]
     abstained: int
 
     def to_dict(self) -> dict[str, object]:
@@ -166,7 +172,7 @@ class TargetingOutcome:
             "abstained": self.abstained,
             "plans": {name: plan.to_dict() for name, plan in self.plans.items()},
             "pilot_values": {name: value.to_dict() for name, value in self.pilot_values.items()},
-            "fairness": self.fairness.to_dict(),
+            "fairness": {name: check.to_dict() for name, check in self.fairness.items()},
         }
 
 
@@ -428,17 +434,21 @@ class UpliftEngine:
                     # the usual cause, and the caller still gets the plan itself.
                     continue
         protected = prepared.protected
-        check = (
-            fairness_check(plans["uplift"].selected, protected, threshold=fairness_threshold)
-            if protected is not None
-            else FairnessCheck(0.0, fairness_threshold, False, 0.0, 0.0)
-        )
+        # Every ranking gets its own check: the list that is released is the list that is judged.
+        checks = {
+            name: (
+                fairness_check(plan.selected, protected, threshold=fairness_threshold)
+                if protected is not None
+                else FairnessCheck(0.0, fairness_threshold, False, 0.0, 0.0)
+            )
+            for name, plan in plans.items()
+        }
         return TargetingOutcome(
             budget=budget,
             cost_per_offer=cost_per_offer,
             plans=plans,
             pilot_values=pilot_values,
-            fairness=check,
+            fairness=checks,
             abstained=int((~eligible).sum()),
         )
 

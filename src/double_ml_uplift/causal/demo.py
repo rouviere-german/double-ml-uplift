@@ -205,6 +205,7 @@ def run_uplift_demo(workdir: Path) -> dict[str, Any]:
     policies = {
         name: {
             "n_selected": plan.n_selected,
+            "fairness": outcome.fairness[name].to_dict(),
             "pilot_value": outcome.pilot_values[name].to_dict(),
             "true_value": round(true_policy_value(plan.selected, y0, y1), 3),
             "pilot_ci_covers_true_value": outcome.pilot_values[name].covers(
@@ -255,7 +256,7 @@ def run_uplift_demo(workdir: Path) -> dict[str, Any]:
         "targeting": {
             "budget_fraction": 0.2,
             "abstained": outcome.abstained,
-            "fairness": outcome.fairness.to_dict(),
+            "fairness": {name: check.to_dict() for name, check in outcome.fairness.items()},
             "policies": policies,
         },
         "approval": _approval_flow(workdir, payload),

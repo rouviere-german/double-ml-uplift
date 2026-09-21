@@ -292,9 +292,10 @@ names the test that holds it. The ones specific to this system:
 - **Customers are pseudonyms.** Every response, log line, audit record and export refers to
   customers as `cid_<40 hex>` = HMAC-SHA256(pepper, id). Without a configured pepper the service
   refuses to start. Aggregates below `min_cohort_size` are refused.
-- **Allocation fairness.** A targeting list whose selection rates differ between the protected
-  groups by more than `APP_FAIRNESS_MAX_DISPARITY` is blocked before release, and the block is
-  audited.
+- **Allocation fairness.** Every ranking is checked separately, and the list actually being
+  released is the list that is judged: a targeting list whose selection rates differ between the
+  protected groups by more than `APP_FAIRNESS_MAX_DISPARITY` is blocked before release, and the
+  block is audited with the ranking that caused it.
 - **Tamper-evident audit.** Every export request, decision, refusal and release is one JSON line
   whose digest covers the previous digest; records are redacted before they are hashed.
 - **No pickle anywhere.** Models are LightGBM text dumps or JSON coefficients, each carrying its

@@ -168,8 +168,10 @@ attribute (see Ethical considerations).
   the right tool partly because it can decline to contact those customers.
 - **Allocation fairness.** The simulator includes a synthetic binary protected attribute, and a
   targeting list whose selection rates differ between the groups by more than
-  `APP_FAIRNESS_MAX_DISPARITY` (default 0.15) is blocked before release, with the block written to
-  the audit chain. This is **demographic parity on one binary attribute** — one definition among
+  `APP_FAIRNESS_MAX_DISPARITY` (default 0.15) is blocked before release. Each candidate ranking
+  carries its own check, so the list an operator asks to release is the one measured, and the
+  block is written to the audit chain along with the ranking that caused it. This is
+  **demographic parity on one binary attribute** — one definition among
   several, and it says nothing about intersectional disparity or about whether the underlying
   effect estimates are equally accurate in both groups.
 - **Privacy.** Customer ids appear only as `cid_<40 hex>` = HMAC-SHA256(pepper, id). The service

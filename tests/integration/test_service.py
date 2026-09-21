@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -610,3 +611,47 @@ def test_an_unknown_refusal_reason_is_folded_into_a_bounded_label() -> None:
     assert registry.get_sample_value("uplift_refusals_total", {"reason": "other"}) == 1.0
     assert registry.get_sample_value("uplift_refusals_total", {"reason": "positivity"}) == 1.0
     assert "other" not in REFUSAL_REASONS
+
+
+def test_the_fairness_check_is_computed_on_the_ranking_being_released(
+    tmp_path: Path, analyst: dict[str, str], operator: dict[str, str]
+) -> None:
+    """The gate must judge the list the operator asked for, not always the uplift list.
+
+    On this fixture the uplift list has a disparity of about 0.0146 and the propensity list about
+    0.0729. A release limit strictly between them must accept the first and refuse the second; a
+    gate that always looks at the uplift list would wave the propensity list through and, worse,
+    show the operator a diagnostic describing a different list.
+    """
+    settings = make_settings(tmp_path, fairness_max_disparity=0.04)
+    app = create_service_app(
+        bundled_spec("retention_offer"),
+        settings=settings,
+        config=CONFIG,
+        registry=CollectorRegistry(),
+    )
+    with TestClient(app, raise_server_exceptions=False) as scoped:
+        assert estimate(scoped, analyst).status_code == 200
+
+        allowed = request_export(scoped, operator, ranking="uplift")
+        assert allowed.status_code == 200, allowed.text
+        assert allowed.json()["fairness"]["blocked"] is False
+        assert allowed.json()["fairness"]["disparity"] < 0.04
+
+        refused = request_export(scoped, operator, ranking="propensity")
+        assert refused.status_code == 422, refused.text
+        assert refused.json()["error"]["code"] == "fairness_disparity"
+
+    from double_ml_uplift.service.audit import verify_file
+
+    log = tmp_path / "audit" / "exports.jsonl"
+    assert verify_file(log) >= 1
+    blocked = [
+        json.loads(line)
+        for line in log.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["action"] == "export_blocked_by_fairness"
+    ]
+    assert len(blocked) == 1
+    assert blocked[0]["data"]["ranking"] == "propensity"
+    assert blocked[0]["data"]["disparity"] > 0.04
+
