@@ -1,0 +1,231 @@
+{
+  "replications": 50,
+  "rows": 2000,
+  "ate_accuracy": {
+    "linear": {
+      "estimators": {
+        "naive": {
+          "bias": -13.6751,
+          "rmse": 15.0791,
+          "coverage": 0.52,
+          "mean_se": 6.8734,
+          "empirical_sd": 6.4183,
+          "draws": 50
+        },
+        "outcome_regression": {
+          "bias": -3.2473,
+          "rmse": 4.1717,
+          "coverage": 0.32,
+          "mean_se": 1.1025,
+          "empirical_sd": 2.6454,
+          "draws": 50
+        },
+        "ipw": {
+          "bias": 0.1595,
+          "rmse": 4.1962,
+          "coverage": 1.0,
+          "mean_se": 8.7834,
+          "empirical_sd": 4.2358,
+          "draws": 50
+        },
+        "aipw": {
+          "bias": 1.9103,
+          "rmse": 3.5353,
+          "coverage": 0.98,
+          "mean_se": 3.9423,
+          "empirical_sd": 3.005,
+          "draws": 50
+        },
+        "dml": {
+          "bias": -0.3862,
+          "rmse": 2.5623,
+          "coverage": 0.96,
+          "mean_se": 2.5687,
+          "empirical_sd": 2.5588,
+          "draws": 50
+        }
+      },
+      "gate_refusal_rate": 0.0
+    },
+    "nonlinear": {
+      "estimators": {
+        "naive": {
+          "bias": -10.4423,
+          "rmse": 12.7975,
+          "coverage": 0.8,
+          "mean_se": 8.3762,
+          "empirical_sd": 7.4734,
+          "draws": 50
+        },
+        "outcome_regression": {
+          "bias": -7.32,
+          "rmse": 7.7777,
+          "coverage": 0.02,
+          "mean_se": 1.2158,
+          "empirical_sd": 2.6552,
+          "draws": 50
+        },
+        "ipw": {
+          "bias": -0.4969,
+          "rmse": 6.2132,
+          "coverage": 1.0,
+          "mean_se": 11.1512,
+          "empirical_sd": 6.2562,
+          "draws": 50
+        },
+        "aipw": {
+          "bias": 2.0605,
+          "rmse": 4.6135,
+          "coverage": 0.98,
+          "mean_se": 4.9975,
+          "empirical_sd": 4.1697,
+          "draws": 50
+        },
+        "dml": {
+          "bias": -1.4226,
+          "rmse": 2.7966,
+          "coverage": 0.94,
+          "mean_se": 2.8115,
+          "empirical_sd": 2.4321,
+          "draws": 50
+        }
+      },
+      "gate_refusal_rate": 0.0
+    },
+    "heterogeneous": {
+      "estimators": {
+        "naive": {
+          "bias": -19.0598,
+          "rmse": 20.1845,
+          "coverage": 0.2,
+          "mean_se": 7.2312,
+          "empirical_sd": 6.7111,
+          "draws": 50
+        },
+        "outcome_regression": {
+          "bias": -3.2747,
+          "rmse": 4.2131,
+          "coverage": 0.46,
+          "mean_se": 1.3948,
+          "empirical_sd": 2.6778,
+          "draws": 50
+        },
+        "ipw": {
+          "bias": 0.5739,
+          "rmse": 4.4159,
+          "coverage": 1.0,
+          "mean_se": 9.1995,
+          "empirical_sd": 4.4228,
+          "draws": 50
+        },
+        "aipw": {
+          "bias": 1.8521,
+          "rmse": 3.677,
+          "coverage": 0.96,
+          "mean_se": 4.0757,
+          "empirical_sd": 3.2087,
+          "draws": 50
+        },
+        "dml": {
+          "bias": -0.1937,
+          "rmse": 2.7501,
+          "coverage": 0.96,
+          "mean_se": 2.797,
+          "empirical_sd": 2.7711,
+          "draws": 50
+        }
+      },
+      "gate_refusal_rate": 0.0
+    },
+    "weak_overlap": {
+      "estimators": {
+        "naive": {
+          "bias": -24.7686,
+          "rmse": 25.4402,
+          "coverage": 0.02,
+          "mean_se": 6.9481,
+          "empirical_sd": 5.866,
+          "draws": 50
+        },
+        "outcome_regression": {
+          "bias": -11.7173,
+          "rmse": 12.1716,
+          "coverage": 0.0,
+          "mean_se": 1.3022,
+          "empirical_sd": 3.3278,
+          "draws": 50
+        },
+        "ipw": {
+          "bias": 5.4546,
+          "rmse": 11.9591,
+          "coverage": 1.0,
+          "mean_se": 17.1627,
+          "empirical_sd": 10.7507,
+          "draws": 50
+        },
+        "aipw": {
+          "bias": 6.4762,
+          "rmse": 9.694,
+          "coverage": 1.0,
+          "mean_se": 11.1286,
+          "empirical_sd": 7.2866,
+          "draws": 50
+        },
+        "dml": {
+          "bias": -1.5917,
+          "rmse": 3.7729,
+          "coverage": 0.94,
+          "mean_se": 3.3046,
+          "empirical_sd": 3.4555,
+          "draws": 50
+        }
+      },
+      "gate_refusal_rate": 1.0
+    }
+  },
+  "cate_quality": {
+    "heterogeneous": {
+      "pehe_dr_learner": 11.6175,
+      "pehe_outcome_regression": 31.0018,
+      "pehe_constant_ate": 43.7349,
+      "calibration_slope": 1.0878,
+      "draws": 10
+    },
+    "nonlinear": {
+      "pehe_dr_learner": 11.7535,
+      "pehe_outcome_regression": 36.7635,
+      "pehe_constant_ate": 22.8387,
+      "calibration_slope": 0.89,
+      "draws": 10
+    }
+  },
+  "refuters": {
+    "false_flag_rate": {
+      "e_value": 0.1,
+      "pilot_consistency": 0.0,
+      "placebo_treatment": 0.0,
+      "random_common_cause": 0.0,
+      "subset_stability": 0.0
+    },
+    "false_flag_draws": 10,
+    "hidden_confounder_detection_rate": 0.92,
+    "hidden_confounder_mean_bias": 64.0279,
+    "detection_draws": 25
+  },
+  "targeting": {
+    "budget_fraction": 0.2,
+    "draws": 10,
+    "pilot_ci_coverage": 1.0,
+    "uplift_beats_propensity_rate": 1.0,
+    "mean_true_value_uplift": 10.3292,
+    "mean_true_value_propensity": -6.4054,
+    "mean_true_value_treat_all": 3.436
+  },
+  "seconds": 184.3,
+  "machine": {
+    "platform": "Windows-10-10.0.19045-SP0",
+    "python": "3.12.14",
+    "cpu_count": 6,
+    "processor": "Intel64 Family 6 Model 158 Stepping 10, GenuineIntel"
+  }
+}

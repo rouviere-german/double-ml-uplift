@@ -1,0 +1,11 @@
+{
+  "_comment": "p95 regression limits for bench/bench_baseline.py --check, in microseconds. Each is about 5x the value measured on the development machine (Windows 10, 6 CPUs, Python 3.12, CPU only) and recorded in the README Results section, so CI catches an order-of-magnitude regression without failing on shared-runner noise.",
+  "d_separation_24_node_dag": {"p95_us": 400},
+  "identify_backdoor_retention_spec": {"p95_us": 2000},
+  "fold_assignment_100k_ids": {"p95_us": 800000},
+  "cross_fit_10k_rows_5_folds_gbm": {"p95_us": 4500000},
+  "score_10k_rows": {"p95_us": 100000},
+  "drift_check_10k_vs_10k": {"p95_us": 20000},
+  "audit_append_fsync": {"p95_us": 80000},
+  "audit_verify_500_entries": {"p95_us": 90000}
+}

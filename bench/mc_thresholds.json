@@ -1,0 +1,37 @@
+{
+  "_comment": "Target bands for bench/bench_montecarlo.py. --check widens every band by a Monte Carlo allowance of 2.5*sqrt(0.95*0.05/replications), so the same file works for the 50-replication CI job and the 200-replication report.",
+  "coverage": {
+    "linear": {"aipw": [0.91, 0.98], "dml": [0.91, 0.98]},
+    "nonlinear": {"aipw": [0.91, 0.98], "dml": [0.91, 0.98]},
+    "heterogeneous": {"aipw": [0.91, 0.98], "dml": [0.91, 0.98]}
+  },
+  "max_abs_bias": {
+    "linear": {"aipw": 6.0, "dml": 6.0},
+    "nonlinear": {"aipw": 8.0, "dml": 8.0},
+    "heterogeneous": {"aipw": 6.0, "dml": 6.0}
+  },
+  "min_abs_bias": {
+    "linear": {"naive": 8.0},
+    "heterogeneous": {"naive": 8.0}
+  },
+  "gate_refusal_rate": {
+    "weak_overlap": {"min": 0.9},
+    "linear": {"max": 0.25},
+    "heterogeneous": {"max": 0.25}
+  },
+  "max_pehe": {
+    "heterogeneous": 0.75,
+    "nonlinear": 0.95
+  },
+  "max_false_flag_rate": {
+    "placebo_treatment": 0.15,
+    "random_common_cause": 0.2,
+    "subset_stability": 0.15,
+    "pilot_consistency": 0.15
+  },
+  "min_hidden_confounder_detection": 0.8,
+  "targeting": {
+    "pilot_ci_coverage": 0.85,
+    "uplift_beats_propensity_rate": 0.9
+  }
+}
