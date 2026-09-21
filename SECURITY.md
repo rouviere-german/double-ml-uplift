@@ -35,3 +35,7 @@ upstream).
   `repr`; the bundled fold salt is a public default and should be replaced per environment when
   fold assignment is adversarially relevant.
 - Artifacts use pickle-free formats (JSON, npz with `allow_pickle=False`).
+- The approval store is capped at 1,000 records. The cap is applied to expired and
+  already-decided records first, and a request that would evict a live one is refused with
+  `503 approval_store_full`, so no operator can flush another operator's pending approval out of
+  the store.

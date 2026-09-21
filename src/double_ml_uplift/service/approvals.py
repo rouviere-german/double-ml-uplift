@@ -11,7 +11,13 @@ outside it, so it is the one action that needs a second person. The rules, all o
   someone else's approved export;
 * an approval is consumed once. Two processes sharing the store take a file lock and reload
   before deciding, so a concurrent second release is refused;
-* approvals expire.
+* approvals expire;
+* the store is capped at ``max_records`` (1,000 by default) so the file cannot grow without
+  bound. The cap is applied to expired and already-decided records first. Applying it by age
+  alone would let anyone holding an operator token evict another operator's pending or approved
+  record simply by making a thousand fresh requests, and the release would then fail with
+  "unknown export request" -- no escalation, but a quiet availability failure in a control-plane
+  store. A request that would evict a *live* record is refused instead.
 
 The store is a JSON file. It is not itself tamper-evident: whoever can write it can forge an
 approved record. It is protected the way the audit log is -- by file permissions -- and every
@@ -34,19 +40,30 @@ from double_ml_uplift.core.canonical import canonical_json, sha256_hex
 from double_ml_uplift.core.fileio import atomic_write_text, file_lock
 
 __all__ = [
+    "MAX_RECORDS",
     "ApprovalError",
     "ApprovalRecord",
     "ApprovalStore",
+    "ApprovalStoreFullError",
     "ExportPayload",
     "payload_digest",
 ]
 
 Status = Literal["pending", "approved", "denied", "consumed"]
-_MAX_RECORDS: Final = 1_000
+
+MAX_RECORDS: Final = 1_000
+"""Default cap on stored records. See the module docstring for why it is not applied by age."""
+
+# A record still capable of being acted on: nothing else is worth protecting from eviction.
+_LIVE_STATUSES: Final = frozenset({"pending", "approved"})
 
 
 class ApprovalError(ValueError):
     """An approval is missing, expired, already used, or does not match the request."""
+
+
+class ApprovalStoreFullError(ApprovalError):
+    """Every slot holds a live request, so a new one would evict somebody else's."""
 
 
 class ApprovalRecord(BaseModel):
@@ -96,13 +113,26 @@ def payload_digest(payload: ExportPayload) -> str:
 class ApprovalStore:
     """A small persisted approval store with cross-process locking."""
 
-    def __init__(self, path: Path, *, ttl_seconds: float = 900.0, clock: Any = None) -> None:
+    def __init__(
+        self,
+        path: Path,
+        *,
+        ttl_seconds: float = 900.0,
+        clock: Any = None,
+        max_records: int = MAX_RECORDS,
+    ) -> None:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
+        if max_records < 1:
+            raise ValueError("max_records must be positive")
         self.path = path
         self.ttl_seconds = ttl_seconds
+        self.max_records = max_records
         self._clock = clock or time.time
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _is_live(self, record: ApprovalRecord, now: float) -> bool:
+        return record.status in _LIVE_STATUSES and now <= record.expires_at
 
     # --- persistence ---------------------------------------------------------------------
 
@@ -114,8 +144,26 @@ class ApprovalStore:
             raise ApprovalError("approval store is not a JSON object")
         return {str(key): ApprovalRecord.model_validate(value) for key, value in document.items()}
 
+    def _prune(self, records: dict[str, ApprovalRecord]) -> list[ApprovalRecord]:
+        """Apply the cap to spent records first, and only then to live ones.
+
+        ``request`` refuses before the live set can exceed the cap, so the final fallback here
+        is unreachable in the normal flow; it exists so that a store restored from an oversized
+        file still converges instead of growing forever.
+        """
+        if len(records) <= self.max_records:
+            return sorted(records.values(), key=lambda item: item.created_at)
+        now = float(self._clock())
+        live = [item for item in records.values() if self._is_live(item, now)]
+        spent = [item for item in records.values() if not self._is_live(item, now)]
+        room = self.max_records - len(live)
+        if room <= 0:
+            return sorted(live, key=lambda item: item.created_at)[-self.max_records :]
+        keep = live + sorted(spent, key=lambda item: item.created_at)[-room:]
+        return sorted(keep, key=lambda item: item.created_at)
+
     def _save(self, records: dict[str, ApprovalRecord]) -> None:
-        pruned = sorted(records.values(), key=lambda item: item.created_at)[-_MAX_RECORDS:]
+        pruned = self._prune(records)
         atomic_write_text(
             self.path,
             json.dumps(
@@ -140,6 +188,11 @@ class ApprovalStore:
         )
         with file_lock(self.path):
             records = self._load()
+            if sum(self._is_live(item, now) for item in records.values()) >= self.max_records:
+                raise ApprovalStoreFullError(
+                    f"the approval store already holds {self.max_records} live export requests; "
+                    "decide or let some expire before asking for another"
+                )
             records[record.request_id] = record
             self._save(records)
         return record

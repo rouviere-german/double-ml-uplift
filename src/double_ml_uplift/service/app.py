@@ -52,6 +52,7 @@ from double_ml_uplift.ml.registry import ModelRegistry
 from double_ml_uplift.service.approvals import (
     ApprovalError,
     ApprovalStore,
+    ApprovalStoreFullError,
     ExportPayload,
     payload_digest,
 )
@@ -362,7 +363,13 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
                 "The allocation disparity between protected groups exceeds the release limit.",
             )
         payload = _payload(state, result, plan.selected, body)
-        record = state.approvals.request(principal.subject, payload)
+        try:
+            record = state.approvals.request(principal.subject, payload)
+        except ApprovalStoreFullError as exc:
+            # Refusing is the honest answer: the alternative is evicting somebody else's pending
+            # approval, which would surface later as "unknown export request".
+            state.metrics.refuse("approval")
+            raise AppError(503, "approval_store_full", str(exc)) from None
         state.audit.append(
             principal.subject,
             "export_requested",

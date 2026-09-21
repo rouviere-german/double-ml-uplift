@@ -22,6 +22,7 @@ from double_ml_uplift.core.config import Settings
 from double_ml_uplift.core.security import hash_api_key
 from double_ml_uplift.ml.registry import ModelRegistry
 from double_ml_uplift.service.app import create_service_app
+from double_ml_uplift.service.approvals import ApprovalStore
 from double_ml_uplift.service.auth import issue_token
 from double_ml_uplift.service.identifiers import (
     PSEUDONYM_PATTERN,
@@ -580,6 +581,39 @@ def test_a_disparate_allocation_is_blocked_and_audited(client: TestClient, tmp_p
     log = tmp_path / "audit" / "exports.jsonl"
     assert verify_file(log) >= 1
     assert "export_blocked_by_fairness" in log.read_text(encoding="utf-8")
+
+
+def test_a_full_approval_store_refuses_rather_than_evicting_a_live_request(
+    tmp_path: Path, analyst: dict[str, str], operator: dict[str, str], settings: Settings
+) -> None:
+    """Flooding the store must not silently drop somebody else's pending export request."""
+    app = create_service_app(
+        bundled_spec("retention_offer"),
+        settings=settings,
+        config=CONFIG,
+        registry=CollectorRegistry(),
+    )
+    app.state.service.approvals = ApprovalStore(
+        Path(settings.data_dir) / "approvals.json",
+        ttl_seconds=settings.approval_ttl_seconds,
+        max_records=2,
+    )
+    with TestClient(app, raise_server_exceptions=False) as scoped:
+        assert estimate(scoped, analyst).status_code == 200
+        first = request_export(scoped, operator, budget_fraction=0.2).json()["request_id"]
+        assert request_export(scoped, operator, budget_fraction=0.3).status_code == 200
+
+        full = request_export(scoped, operator, budget_fraction=0.4)
+        assert full.status_code == 503, full.text
+        assert full.json()["error"]["code"] == "approval_store_full"
+
+        # The first request is still there to be decided on.
+        second = token(settings, "operator-b", "operator")
+        decided = scoped.post(
+            f"/v1/targeting/requests/{first}/decision", json={"approve": True}, headers=second
+        )
+        assert decided.status_code == 200
+        assert decided.json()["status"] == "approved"
 
 
 def test_a_targeting_list_below_the_minimum_cohort_is_refused(
