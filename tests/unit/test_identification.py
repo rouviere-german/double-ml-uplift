@@ -69,7 +69,121 @@ def make_spec(
     )
 
 
-# --- an independent oracle for the backdoor criterion ------------------------------------
+# --- a self-contained oracle, written from the criterion rather than from the module ------
+#
+# The functions below import nothing from ``double_ml_uplift.causal.graph``. They re-derive the
+# back-door criterion from ``spec.edges`` with their own adjacency, trail enumeration and
+# collider handling, so the completeness claim below is checked against an implementation that
+# shares no code with the one under test. The repo-primitive oracle that follows is kept for the
+# soundness and minimality checks -- those reuse ``path_is_blocked``, which row 1 of CLAIMS.md
+# pins separately against brute-force path enumeration -- and the two are asserted to agree.
+
+
+def _children(spec: CausalSpec) -> dict[str, set[str]]:
+    table: dict[str, set[str]] = {name: set() for name in spec.nodes}
+    for parent, child in spec.edges:
+        table[parent].add(child)
+    return table
+
+
+def _parents(spec: CausalSpec) -> dict[str, set[str]]:
+    table: dict[str, set[str]] = {name: set() for name in spec.nodes}
+    for parent, child in spec.edges:
+        table[child].add(parent)
+    return table
+
+
+def _reachable(start: str, step: dict[str, set[str]]) -> set[str]:
+    """Proper descendants (or ancestors) of ``start`` under the given adjacency."""
+    seen: set[str] = set()
+    stack = list(step[start])
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(step[node])
+    return seen
+
+
+def _trails(spec: CausalSpec, start: str, end: str) -> list[list[str]]:
+    """Every simple undirected path from ``start`` to ``end``, edge directions ignored."""
+    neighbours: dict[str, set[str]] = {name: set() for name in spec.nodes}
+    for parent, child in spec.edges:
+        neighbours[parent].add(child)
+        neighbours[child].add(parent)
+    found: list[list[str]] = []
+
+    def walk(path: list[str]) -> None:
+        node = path[-1]
+        if node == end:
+            found.append(list(path))
+            return
+        for nxt in sorted(neighbours[node]):
+            if nxt not in path:
+                path.append(nxt)
+                walk(path)
+                path.pop()
+
+    walk([start])
+    return found
+
+
+def _trail_is_blocked(spec: CausalSpec, trail: list[str], conditioned: set[str]) -> bool:
+    """Pearl's d-separation rule, applied node by node along one trail.
+
+    A trail is blocked when some intermediate node blocks it: a non-collider that is conditioned
+    on, or a collider with neither itself nor any of its descendants conditioned on.
+    """
+    children = _children(spec)
+    for position in range(1, len(trail) - 1):
+        before, node, after = trail[position - 1], trail[position], trail[position + 1]
+        collider = node in children[before] and node in children[after]
+        if collider:
+            opened = {node} | _reachable(node, children)
+            if not (opened & conditioned):
+                return True
+        elif node in conditioned:
+            return True
+    return False
+
+
+def _backdoor_trails(spec: CausalSpec) -> list[list[str]]:
+    """Trails leaving the treatment through an arrowhead into it."""
+    parents = _parents(spec)
+    return [
+        trail
+        for trail in _trails(spec, spec.treatment, spec.outcome)
+        if len(trail) > 1 and trail[1] in parents[spec.treatment]
+    ]
+
+
+def independent_pool(spec: CausalSpec) -> list[str]:
+    """Variables the criterion allows: observed, not on or below the treatment or the outcome."""
+    children = _children(spec)
+    banned = {spec.treatment, spec.outcome}
+    banned |= _reachable(spec.treatment, children) | _reachable(spec.outcome, children)
+    banned |= set(spec.forbidden_columns)
+    banned |= {name for name, node in spec.nodes.items() if not node.observed}
+    return sorted(set(spec.nodes) - banned)
+
+
+def independent_blocks(spec: CausalSpec, adjustment: Iterable[str]) -> bool:
+    conditioned = set(adjustment)
+    return all(_trail_is_blocked(spec, trail, conditioned) for trail in _backdoor_trails(spec))
+
+
+def independent_has_any_valid_set(spec: CausalSpec) -> bool:
+    """Brute force over every subset of the admissible pool, using only the code above."""
+    pool = independent_pool(spec)
+    return any(
+        independent_blocks(spec, subset)
+        for size in range(len(pool) + 1)
+        for subset in combinations(pool, size)
+    )
+
+
+# --- an oracle built on the path primitives that CLAIMS.md row 1 pins independently -------
 
 
 def oracle_pool(spec: CausalSpec) -> list[str]:
@@ -554,8 +668,30 @@ def test_an_identified_set_really_blocks_every_backdoor_path(spec: CausalSpec) -
 @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
 @given(spec=random_specs())
 def test_a_refusal_means_no_admissible_subset_would_have_worked(spec: CausalSpec) -> None:
+    """Completeness, against an oracle that shares no code with the module under test.
+
+    ``independent_has_any_valid_set`` re-derives adjacency, trail enumeration and the collider
+    rule from ``spec.edges`` alone -- see the note above it -- so a shared bug in the repository's
+    path primitives cannot make both sides agree.
+    """
     result = identify_backdoor(spec)
-    assert result.identified == oracle_has_any_valid_set(spec)
+    assert result.identified == independent_has_any_valid_set(spec)
+
+
+@settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
+@given(spec=random_specs())
+def test_the_two_oracles_agree_with_each_other(spec: CausalSpec) -> None:
+    """The self-contained oracle and the one built on the repository's path primitives agree.
+
+    If they ever diverge, one of the two is wrong and the completeness result above is not
+    trustworthy either, so this failure is worth surfacing on its own.
+    """
+    assert sorted(independent_pool(spec)) == sorted(oracle_pool(spec))
+    assert independent_has_any_valid_set(spec) == oracle_has_any_valid_set(spec)
+    identified = identify_backdoor(spec)
+    if identified.identified:
+        assert independent_blocks(spec, identified.adjustment_set)
+        assert oracle_blocks(spec, identified.adjustment_set)
 
 
 @settings(max_examples=150, suppress_health_check=[HealthCheck.too_slow])
