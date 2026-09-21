@@ -91,6 +91,8 @@ class EstimateResponse(BaseModel):
     refutation: dict[str, Any] | None
     calibration: dict[str, Any]
     n_rows: int
+    run_version: str = Field(pattern=r"^[0-9a-f]{64}$")
+    """Content address of this run in the local model registry: SHA-256 of its version record."""
 
 
 class ScoreRequest(BaseModel):

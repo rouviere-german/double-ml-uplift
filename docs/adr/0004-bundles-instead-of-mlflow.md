@@ -41,8 +41,15 @@ model, each verified against its SHA-256 on load.
 - The manifest carries the four hashes, the adjustment set, the gate policy, the calibration bins
   and a capped, deterministically down-sampled vector of training propensities for drift
   comparison — deliberately not the training data.
-- `ScoringBundle.write`/`read` put this on disk; the retained `ml/registry.py` provides
-  content-addressed storage with aliases for callers who want versioning.
+- `ScoringBundle.write`/`read` put this on disk, and `causal/publish.py` stores it in
+  `ml/registry.py`'s content-addressed registry: artifacts under their own SHA-256, the version
+  record under the hash of its canonical form, and an alias (`latest`) pointing at the newest.
+  Every successful `/v1/estimate` publishes, and the response returns the version digest.
+- The registry entry carries a `RunManifest` (`ml/manifest.py`) beside the bundle: interpreter,
+  platform, the versions of the seven packages that can move a number, the git commit and the
+  SHA-256 of `uv.lock`. The bundle manifest says *what* was fitted; the run manifest says *where*.
+  A deployed image that installed from the lockfile and discarded it records `null` rather than
+  failing.
 
 The README records this as a deviation from the original scope rather than quietly dropping it.
 

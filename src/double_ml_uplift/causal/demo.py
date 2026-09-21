@@ -15,7 +15,9 @@ It walks the whole story the repository is about:
 8. a budget-constrained targeting list is built, valued on the randomized pilot, checked for
    allocation fairness, and then held for approval: the requesting operator cannot approve it,
    a second operator can, and the whole sequence is in a verifiable hash chain;
-9. the scoring bundle round-trips without pickle, and a tampered artifact is refused.
+9. the scoring bundle round-trips without pickle, a tampered artifact is refused, and the run is
+   published to the content-addressed registry with the environment that produced it, where a
+   corrupted blob is caught on the way back out.
 """
 
 from __future__ import annotations
@@ -36,12 +38,19 @@ from double_ml_uplift.causal.identification import (
     identify_backdoor,
     verify_adjustment_set,
 )
+from double_ml_uplift.causal.publish import (
+    find_lockfile,
+    load_published_bundle,
+    publish_run,
+    run_manifest,
+)
 from double_ml_uplift.causal.scenarios import load_scenario
 from double_ml_uplift.causal.scm import simulate_campaign
 from double_ml_uplift.causal.spec import CausalSpec, SpecError, bundled_spec
 from double_ml_uplift.causal.targeting import true_policy_value
 from double_ml_uplift.ml.contracts import PotentialOutcomeLeakError, validate_campaign_frame
 from double_ml_uplift.ml.drift import DriftMonitor
+from double_ml_uplift.ml.registry import ModelRegistry, RegistryIntegrityError
 from double_ml_uplift.service.approvals import ApprovalError, ApprovalStore, ExportPayload
 from double_ml_uplift.service.audit import AuditLog, verify_file
 
@@ -163,7 +172,9 @@ def _approval_flow(workdir: Path, payload: ExportPayload) -> dict[str, Any]:
 
 
 def _bundle_round_trip(engine: UpliftEngine, result: Any, workdir: Path) -> dict[str, Any]:
-    manifest, artifacts = engine.bundle(result)
+    manifest, artifacts = engine.bundle(
+        result, metrics={"ate": result.primary.ate, "se": result.primary.se}
+    )
     ScoringBundle.write(workdir / "bundle", manifest, artifacts)
     loaded = ScoringBundle.read(workdir / "bundle")
     uplift, _, _ = loaded.predict(result.prepared.features[:64])
@@ -180,6 +191,55 @@ def _bundle_round_trip(engine: UpliftEngine, result: Any, workdir: Path) -> dict
         "predictions_match": bool(np.allclose(uplift, direct)),
         "tampered_artifact_refused": tamper_refused,
         "calibration_slope": round(result.calibration.slope(), 3),
+        "registry": _registry_round_trip(engine, result, manifest, artifacts, workdir),
+    }
+
+
+def _registry_round_trip(
+    engine: UpliftEngine,
+    result: Any,
+    manifest: Any,
+    artifacts: dict[str, bytes],
+    workdir: Path,
+) -> dict[str, Any]:
+    """Publish the run, read it back through its content address, and corrupt one blob."""
+    registry = ModelRegistry(workdir / "registry")
+    run = run_manifest(
+        result,
+        seed=engine.config.seed,
+        metrics=manifest.metrics,
+        lockfile=find_lockfile(),
+    )
+    version = publish_run(registry, manifest, artifacts, run)
+    restored = load_published_bundle(registry, "latest")
+    from_registry, _, _ = restored.predict(result.prepared.features[:64])
+    direct, _, _ = engine.score_features(result, result.prepared.features[:64])
+
+    # Rewrite one blob's bytes under its unchanged content address.
+    blob = next(iter(sorted(version.files.values())))
+    path = workdir / "registry" / "blobs" / "sha256" / blob[:2] / blob
+    path.write_bytes(path.read_bytes() + b" ")
+    corruption_detected = False
+    try:
+        load_published_bundle(registry, version.digest)
+    except RegistryIntegrityError:
+        corruption_detected = True
+
+    return {
+        "version": version.digest[:16],
+        "alias": "latest",
+        "predictions_match": bool(np.allclose(from_registry, direct)),
+        "corrupted_blob_refused": corruption_detected,
+        "recorded": {
+            "python": run.python,
+            "lockfile_sha256": (
+                str(run.params["lockfile_sha256"])[:16]
+                if run.params["lockfile_sha256"] is not None
+                else None
+            ),
+            "packages": sorted(run.packages),
+            "fold_digest": str(run.params["fold_digest"])[:16],
+        },
     }
 
 

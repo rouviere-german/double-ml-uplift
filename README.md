@@ -97,7 +97,8 @@ Layout:
 ```text
 src/double_ml_uplift/
   causal/   scm, spec, graph, identification, folds, nuisance, estimators,
-            diagnostics, refutation, calibration, targeting, engine, bundle, demo
+            diagnostics, refutation, calibration, targeting, engine, bundle,
+            publish (run manifest + registry), demo
   service/  app, auth (JWT roles), approvals, audit, identifiers, metrics, models
   ml/       pandera contracts, run manifest, registry, PSI/KS drift, safe serialization
   core/     settings, redacting logs, tracing, metrics, hardened FastAPI app
@@ -317,9 +318,11 @@ names the test that holds it. The ones specific to this system:
 - **Real customer data.** Every dataset is simulated from the bundled SCM configs, which is what
   makes ground-truth validation possible. There is no connector, no warehouse integration and no
   PII handling beyond pseudonymisation of the simulated ids.
-- **A model store.** The service holds one specification, one configuration and the last
-  successful estimation. There is no multi-tenancy, no versioned model catalogue and no
-  background retraining. MLflow is **not** wired in — see "Deviations" below.
+- **A model catalogue.** The service holds one specification, one configuration and the last
+  successful estimation. Every successful estimation *is* published to a local content-addressed
+  registry with its run manifest, and the response returns the version digest, but there is no
+  multi-tenancy, no experiment UI and no background retraining: comparing twenty runs means
+  reading twenty manifests. MLflow is **not** wired in — see "Deviations" below.
 - **Clustered, panel or weighted sampling.** Rows are assumed independent. Influence-function
   standard errors and the multiplier bootstrap both assume it.
 - **Production authentication.** Tokens are verified, never minted, in production paths.
@@ -330,9 +333,11 @@ names the test that holds it. The ones specific to this system:
 Recorded honestly rather than quietly dropped:
 
 - **MLflow is not used.** Bundles are written as a manifest plus hash-verified artifacts
-  (`ScoringBundle.write`/`read`) and the in-repo content-addressed registry. Adding an MLflow file
-  backend would have added a large dependency for a store this service does not use. See
-  [ADR 0004](docs/adr/0004-bundles-instead-of-mlflow.md).
+  (`ScoringBundle.write`/`read`) and published to the in-repo content-addressed registry with a
+  run manifest recording the interpreter, platform, package versions, git commit and lockfile
+  digest — the reproducibility record the scope asked MLflow for. Adding an MLflow file backend
+  would have added a large dependency whose default serialisation path is pickle, which this
+  repository bans. See [ADR 0004](docs/adr/0004-bundles-instead-of-mlflow.md).
 - **Polars is not used.** The frames are small enough that pandas plus the pandera contract
   already covers the work, and one dataframe library is simpler to reason about than two.
 - **networkx is not used.** The DAG, d-separation and the backdoor criterion are implemented in

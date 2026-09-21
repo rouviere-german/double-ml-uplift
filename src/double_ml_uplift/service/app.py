@@ -40,6 +40,7 @@ from double_ml_uplift.causal.identification import (
     NotIdentifiedError,
     verify_adjustment_set,
 )
+from double_ml_uplift.causal.publish import find_lockfile, publish_run, run_manifest
 from double_ml_uplift.causal.spec import CausalSpec
 from double_ml_uplift.core.app import create_app
 from double_ml_uplift.core.config import Settings, get_settings
@@ -47,6 +48,7 @@ from double_ml_uplift.core.errors import AppError
 from double_ml_uplift.core.logging import get_logger
 from double_ml_uplift.ml.contracts import ContractLimits, DataContractError
 from double_ml_uplift.ml.drift import psi
+from double_ml_uplift.ml.registry import ModelRegistry
 from double_ml_uplift.service.approvals import (
     ApprovalError,
     ApprovalStore,
@@ -94,6 +96,8 @@ class ServiceState:
     audit: AuditLog
     approvals: ApprovalStore
     metrics: CausalMetrics
+    models: ModelRegistry
+    lockfile: Path | None = None
     result: EstimationResult | None = None
     bundle: ScoringBundle | None = None
     targeting: TargetingOutcome | None = None
@@ -209,7 +213,22 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
             state.metrics.refuse(_gate_reason(exc.reasons))
             raise AppError(422, "not_estimable", " | ".join(exc.reasons)) from None
 
-        manifest, artifacts = engine.bundle(result)
+        manifest, artifacts = engine.bundle(
+            result, metrics={"ate": result.primary.ate, "se": result.primary.se}
+        )
+        # The reproducibility record: the four content digests the bundle already carries, plus
+        # the interpreter, platform, package versions and lockfile digest that produced them.
+        version = publish_run(
+            state.models,
+            manifest,
+            artifacts,
+            run_manifest(
+                result,
+                seed=engine.config.seed,
+                metrics=manifest.metrics,
+                lockfile=state.lockfile,
+            ),
+        )
         state.result = result
         state.bundle = ScoringBundle.load(manifest, artifacts)
         state.targeting = None
@@ -219,6 +238,7 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
             actor=principal.subject,
             rows=result.prepared.n,
             dataset_sha256=result.dataset_sha256,
+            run_version=version.digest,
             estimable=True,
         )
         return EstimateResponse(
@@ -234,6 +254,7 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
             refutation=result.refutation.to_dict() if result.refutation else None,
             calibration=result.calibration.to_dict(),
             n_rows=result.prepared.n,
+            run_version=version.digest,
         )
 
     @router.post("/score", response_model=ScoreResponse)
@@ -485,6 +506,8 @@ def create_service_app(
         audit=AuditLog(data_dir / "audit" / "exports.jsonl"),
         approvals=ApprovalStore(data_dir / "approvals.json", ttl_seconds=cfg.approval_ttl_seconds),
         metrics=create_causal_metrics(metrics_registry),
+        models=ModelRegistry(data_dir / "registry"),
+        lockfile=find_lockfile(),
     )
     app = create_app(
         cfg,

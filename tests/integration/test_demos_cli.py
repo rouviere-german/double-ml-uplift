@@ -114,6 +114,21 @@ def test_the_demo_round_trips_the_bundle_without_pickle(demo: dict[str, Any]) ->
     assert bundle["tampered_artifact_refused"] is True
 
 
+def test_the_demo_publishes_the_run_and_reads_it_back_through_its_content_address(
+    demo: dict[str, Any],
+) -> None:
+    registry = demo["bundle"]["registry"]
+    assert registry["predictions_match"] is True
+    assert registry["corrupted_blob_refused"] is True
+    assert registry["alias"] == "latest"
+    recorded = registry["recorded"]
+    assert recorded["python"].startswith("3.")
+    assert set(recorded["packages"]) >= {"numpy", "pandas", "scikit-learn"}
+    assert len(recorded["fold_digest"]) == 16
+    # The demo runs from the checkout, so the lockfile is visible and its digest is recorded.
+    assert recorded["lockfile_sha256"] is not None
+
+
 def test_the_demo_shows_the_dr_learner_beating_both_baselines(demo: dict[str, Any]) -> None:
     pehe = demo["cate_pehe"]
     assert pehe["dr_learner"] < pehe["outcome_regression"]

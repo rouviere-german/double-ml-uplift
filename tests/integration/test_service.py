@@ -7,17 +7,20 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from prometheus_client import CollectorRegistry
 
 from double_ml_uplift.causal.engine import EstimationConfig
 from double_ml_uplift.causal.nuisance import NuisanceConfig
+from double_ml_uplift.causal.publish import MODEL_NAME, load_published_bundle
 from double_ml_uplift.causal.scenarios import load_scenario
 from double_ml_uplift.causal.scm import SimulatedCampaign, simulate_campaign
 from double_ml_uplift.causal.spec import bundled_spec
 from double_ml_uplift.core.config import Settings
 from double_ml_uplift.core.security import hash_api_key
+from double_ml_uplift.ml.registry import ModelRegistry
 from double_ml_uplift.service.app import create_service_app
 from double_ml_uplift.service.auth import issue_token
 from double_ml_uplift.service.identifiers import (
@@ -189,6 +192,45 @@ def test_an_estimate_returns_every_estimator_with_its_diagnostics(
     assert len(body["dataset_sha256"]) == 64
     assert body["diagnostics"]["n"] == ROWS
     assert "post_offer_logins" not in body["adjustment_set"]
+
+
+def test_an_estimate_is_recorded_in_the_registry_it_reports(
+    client: TestClient, settings: Settings, analyst: dict[str, str]
+) -> None:
+    """The run version in the response is a real registry entry that scores like the service.
+
+    The reproducibility record the specification asks for -- specification, configuration,
+    dataset and fold digests plus the environment and the lockfile -- lives in that entry, so an
+    answer can be traced back to the exact thing that produced it.
+    """
+    body = estimate(client, analyst).json()
+    assert len(body["run_version"]) == 64
+
+    registry = ModelRegistry(Path(settings.data_dir) / "registry")
+    version = registry.get(MODEL_NAME, body["run_version"])
+    assert registry.get(MODEL_NAME, "latest").digest == body["run_version"]
+
+    run = version.manifest
+    assert run.params["spec_sha256"] == body["spec_sha256"]
+    assert run.params["config_sha256"] == body["config_sha256"]
+    assert run.params["dataset_sha256"] == body["dataset_sha256"]
+    assert run.params["fold_digest"] == body["fold_digest"]
+    assert run.params["n_rows"] == body["n_rows"]
+    assert run.python.startswith("3.")
+    assert set(run.packages) >= {"numpy", "pandas", "scikit-learn"}
+
+    # The stored bundle is the one the service is scoring with, not a copy that drifted.
+    published = load_published_bundle(registry, body["run_version"])
+    scored = client.post(
+        "/v1/score", json={"customers": rows_payload(campaign())[:32]}, headers=analyst
+    ).json()
+    features = np.column_stack(
+        [campaign().frame[name].to_numpy(dtype=float)[:32] for name in published.adjustment_set]
+    )
+    uplift, _, _ = published.predict(features)
+    assert [round(float(value), 4) for value in uplift] == [
+        row["uplift"] for row in scored["scored"]
+    ]
 
 
 def test_a_cohort_below_the_minimum_is_refused(client: TestClient, analyst: dict[str, str]) -> None:
