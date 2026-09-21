@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Final
 
 import numpy as np
 import numpy.typing as npt
@@ -32,6 +33,11 @@ __all__ = ["CateCalibration", "calibrate"]
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = npt.NDArray[np.int64]
+
+# Two rows is the smallest sample with both a mean and a standard error: ``std(ddof=1)`` needs
+# ``size - 1`` degrees of freedom, so a one-row bin reports ``inf`` and an empty one reports
+# nothing at all. See :func:`_merge_thin_bins`.
+_MIN_BIN_ROWS: Final = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,24 +112,34 @@ class CateCalibration:
         )
 
 
-def _drop_empty_bins(predicted: FloatArray, edges: FloatArray) -> FloatArray:
-    """Merge away any bin no training row fell into.
+def _merge_thin_bins(predicted: FloatArray, edges: FloatArray) -> FloatArray:
+    """Merge away any bin that cannot support a mean *and* a standard error.
 
     Quantile edges can coincide with a value that actually occurs -- in the limit, a model that
     predicts one number for everybody produces an edge equal to that number and leaves the bin
-    below it empty. An empty bin has no mean and no standard error, so :meth:`interval` would
-    report an effect of exactly zero with a zero-width band for any customer who landed there:
-    the most confident possible answer, from no data at all. Dropping the edge merges the empty
-    bin into its neighbour instead, so every reported interval rests on at least one observation.
+    below it empty. Both degenerate sizes produce a nonsense interval, in opposite directions:
+
+    * an **empty** bin has no mean and no standard error, so :meth:`interval` would report an
+      effect of exactly zero with a zero-width band for any customer who landed there -- the most
+      confident possible answer, from no data at all;
+    * a **one-row** bin has a mean but ``std(ddof=1)`` has nothing to divide by, so its standard
+      error is ``inf`` and the band is infinitely wide. That is not a lie the way a zero-width
+      band is, but ``inf`` is not valid JSON, so the estimate or score carrying it would fail to
+      serialise and surface as a 500 rather than as a wide interval.
+
+    Dropping the edge merges the thin bin into its neighbour, so every reported interval rests on
+    at least ``_MIN_BIN_ROWS`` observations and every reported standard error is finite. Each pass
+    removes one edge and the sample has at least ``2 * n_bins`` rows, so the loop terminates --
+    in the worst case at a single bin holding everything.
     """
     while edges.size:
         counts = np.bincount(
             np.searchsorted(edges, predicted, side="right"), minlength=edges.size + 1
         )
-        empty = np.flatnonzero(counts == 0)
-        if empty.size == 0:
+        thin = np.flatnonzero(counts < _MIN_BIN_ROWS)
+        if thin.size == 0:
             break
-        first = int(empty[0])
+        first = int(thin[0])
         edges = np.delete(edges, max(first - 1, 0))
     return edges
 
@@ -139,7 +155,7 @@ def calibrate(
     if predicted.size < 2 * n_bins:
         raise ValueError(f"at least {2 * n_bins} rows are needed for {n_bins} bins")
     quantiles = np.quantile(predicted, np.linspace(0.0, 1.0, n_bins + 1))
-    edges = _drop_empty_bins(predicted, np.unique(quantiles[1:-1]))
+    edges = _merge_thin_bins(predicted, np.unique(quantiles[1:-1]))
     index = np.searchsorted(edges, predicted, side="right")
     count = edges.size + 1
 
@@ -151,12 +167,10 @@ def calibrate(
         rows = index == position
         size = int(rows.sum())
         bin_count[position] = size
-        if size == 0:
-            continue
         values = pseudo_outcome[rows]
         bin_predicted[position] = float(predicted[rows].mean())
         bin_actual[position] = float(values.mean())
-        bin_se[position] = float(values.std(ddof=1) / np.sqrt(size)) if size > 1 else float("inf")
+        bin_se[position] = float(values.std(ddof=1) / np.sqrt(size))
     return CateCalibration(
         edges=edges,
         bin_predicted=bin_predicted,

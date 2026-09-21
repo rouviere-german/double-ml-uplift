@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 from hypothesis import given, settings
@@ -119,6 +121,57 @@ def test_no_bin_is_ever_empty_so_no_interval_is_built_from_nothing() -> None:
     calibration = calibrate(predicted, pseudo, n_bins=10)
     assert calibration.bin_count.min() >= 1
     assert np.all(calibration.bin_se > 0.0)
+    assert int(calibration.bin_count.sum()) == predicted.size
+
+
+def test_no_bin_rests_on_a_single_row_so_no_band_is_infinitely_wide() -> None:
+    """The opposite degenerate case to the empty bin.
+
+    An empty bin gave an interval of zero width from no data; a one-row bin gives a standard
+    error of ``inf`` -- ``ddof=1`` has nothing to divide by -- and therefore an interval of
+    infinite width. It is not a lie the way a zero-width band is, but ``inf`` is not valid JSON,
+    so it would surface as a 500 from ``/v1/estimate`` or ``/v1/score`` rather than as a wide
+    band. Merge the thin bin into its neighbour instead.
+    """
+    rng = np.random.default_rng(3)
+    predicted = np.concatenate([np.zeros(200), np.array([0.5]), np.ones(199)])
+    pseudo = predicted * 0.8 + rng.normal(size=predicted.size)
+    calibration = calibrate(predicted, pseudo, n_bins=10)
+
+    assert calibration.bin_count.min() >= 2
+    assert bool(np.isfinite(calibration.bin_se).all())
+    assert int(calibration.bin_count.sum()) == predicted.size
+    _, se, low, high = calibration.interval(np.array([0.5]))
+    assert bool(np.isfinite(se).all())
+    assert bool(np.isfinite(low).all())
+    assert bool(np.isfinite(high).all())
+    json.dumps(calibration.to_dict(), allow_nan=False)
+
+
+@settings(max_examples=100, deadline=None)
+@given(
+    distinct=st.lists(
+        st.floats(min_value=-20.0, max_value=20.0, allow_nan=False, allow_infinity=False),
+        min_size=1,
+        max_size=6,
+        unique=True,
+    ),
+    repeats=st.lists(st.integers(min_value=1, max_value=120), min_size=1, max_size=6),
+    n_bins=st.integers(min_value=2, max_value=12),
+)
+def test_every_bin_always_has_at_least_two_rows(
+    distinct: list[float], repeats: list[int], n_bins: int
+) -> None:
+    """Whatever the shape of the prediction distribution, no bin is empty and none has one row."""
+    sizes = [repeats[index % len(repeats)] for index in range(len(distinct))]
+    predicted = np.repeat(np.array(distinct, dtype=np.float64), sizes)
+    if predicted.size < 2 * n_bins:
+        return
+    rng = np.random.default_rng(len(predicted))
+    pseudo = predicted * 0.5 + rng.normal(size=predicted.size)
+    calibration = calibrate(predicted, pseudo, n_bins=n_bins)
+    assert calibration.bin_count.min() >= 2
+    assert bool(np.isfinite(calibration.bin_se).all())
     assert int(calibration.bin_count.sum()) == predicted.size
 
 
