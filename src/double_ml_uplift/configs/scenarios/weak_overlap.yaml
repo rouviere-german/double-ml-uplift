@@ -1,0 +1,15 @@
+# The historical targeting rule was close to deterministic, so positivity fails for a large
+# share of customers. The overlap gate is expected to refuse every draw from this scenario.
+name: weak_overlap
+confounding_strength: 1.0
+overlap_tilt: 3.5
+hidden_confounder_strength: 0.0
+nonlinear: false
+n_customers: 2000
+seed: 20260404
+pilot_fraction: 0.12
+outcome_noise_sd: 45.0
+direct_effect: [14.0, 18.0, -26.0, 9.0]
+mediator_effect: 4.0
+mediator_coefficient: 5.0
+offer_cost: 12.0

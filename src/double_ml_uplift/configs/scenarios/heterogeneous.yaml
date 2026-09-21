@@ -1,0 +1,15 @@
+# Strong effect heterogeneity, including a large group the offer actively harms. This is the
+# scenario where targeting by uplift can beat treating everyone by a wide margin.
+name: heterogeneous
+confounding_strength: 0.9
+overlap_tilt: 1.0
+hidden_confounder_strength: 0.0
+nonlinear: false
+n_customers: 2000
+seed: 20260303
+pilot_fraction: 0.12
+outcome_noise_sd: 45.0
+direct_effect: [6.0, 34.0, -52.0, 16.0]
+mediator_effect: 4.0
+mediator_coefficient: 5.0
+offer_cost: 12.0

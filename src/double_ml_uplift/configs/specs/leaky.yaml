@@ -1,0 +1,112 @@
+# Deliberately broken specification, kept so the tests and the demo can show the validator
+# refusing it: offer_redeemed is a child of the treatment but is labelled a confounder, which
+# is how post-treatment leakage usually enters a pipeline. Loading this file raises SpecError.
+#
+# This file is the analyst's assumption, written down and version-controlled. Its SHA-256 is
+# recorded with every estimate. Nothing in this repository tries to discover the graph; the
+# identification module only decides whether the graph as declared identifies the effect from
+# the observed columns, and refuses when it does not.
+version: 1
+name: retention-offer-leaky
+unit_id: customer_id
+treatment: offer_sent
+outcome: retained_revenue
+pilot_column: pilot
+protected_attribute: protected_group
+
+nodes:
+  tenure_months:
+    kind: continuous
+    role: confounder
+    minimum: 0
+    maximum: 240
+    description: Months since signup, measured before the campaign window.
+  monthly_spend:
+    kind: continuous
+    role: confounder
+    minimum: 0
+    maximum: 5000
+    description: Average monthly spend over the three months before the campaign.
+  support_tickets:
+    kind: count
+    role: confounder
+    minimum: 0
+    maximum: 200
+    description: Support tickets opened before the campaign.
+  discount_count:
+    kind: count
+    role: confounder
+    minimum: 0
+    maximum: 50
+    description: Discounts already granted before the campaign.
+  engagement_score:
+    kind: continuous
+    role: confounder
+    minimum: -10
+    maximum: 10
+    description: Product engagement index, standardised, measured before the campaign.
+  protected_group:
+    kind: binary
+    role: confounder
+    description: Synthetic protected attribute, used only by the allocation fairness check.
+  pilot:
+    kind: binary
+    role: design
+    description: Randomised holdout slice; inside it the offer was assigned by a coin flip.
+  offer_sent:
+    kind: binary
+    role: treatment
+    description: The retention offer was sent.
+  post_offer_logins:
+    kind: continuous
+    role: post_treatment
+    minimum: 0
+    maximum: 1000
+    description: Logins after the offer window. A mediator, never an adjustment variable.
+  offer_redeemed:
+    kind: binary
+    role: confounder
+    description: The offer was redeemed. Strictly downstream of the treatment.
+  csat_after_offer:
+    kind: continuous
+    role: post_treatment
+    minimum: 0
+    maximum: 10
+    description: Satisfaction survey. A collider on treatment and outcome.
+  retained_revenue:
+    kind: continuous
+    role: outcome
+    minimum: -5000
+    maximum: 20000
+    description: Revenue retained over the 90 days after the campaign window.
+
+edges:
+  - [tenure_months, offer_sent]
+  - [monthly_spend, offer_sent]
+  - [support_tickets, offer_sent]
+  - [discount_count, offer_sent]
+  - [engagement_score, offer_sent]
+  - [protected_group, offer_sent]
+  - [pilot, offer_sent]
+  - [tenure_months, retained_revenue]
+  - [monthly_spend, retained_revenue]
+  - [support_tickets, retained_revenue]
+  - [discount_count, retained_revenue]
+  - [engagement_score, retained_revenue]
+  - [protected_group, retained_revenue]
+  - [tenure_months, post_offer_logins]
+  - [monthly_spend, post_offer_logins]
+  - [support_tickets, post_offer_logins]
+  - [engagement_score, post_offer_logins]
+  - [offer_sent, post_offer_logins]
+  - [post_offer_logins, retained_revenue]
+  - [offer_sent, retained_revenue]
+  - [offer_sent, offer_redeemed]
+  - [offer_sent, csat_after_offer]
+  - [retained_revenue, csat_after_offer]
+
+# Columns that must never enter an adjustment set, whatever the graph says. The DAG already
+# places these downstream of the treatment; the list is belt and braces for reviewers.
+forbidden_columns:
+  - post_offer_logins
+  - csat_after_offer

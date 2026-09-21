@@ -1,0 +1,15 @@
+# Same confounding, but the outcome and treatment mechanisms are nonlinear, so linear
+# nuisances are misspecified and the learners have to do real work.
+name: nonlinear
+confounding_strength: 0.9
+overlap_tilt: 1.0
+hidden_confounder_strength: 0.0
+nonlinear: true
+n_customers: 2000
+seed: 20260202
+pilot_fraction: 0.12
+outcome_noise_sd: 45.0
+direct_effect: [14.0, 18.0, -26.0, 9.0]
+mediator_effect: 4.0
+mediator_coefficient: 5.0
+offer_cost: 12.0

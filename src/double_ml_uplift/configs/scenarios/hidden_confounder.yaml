@@ -1,0 +1,15 @@
+# Unconfoundedness is violated: a latent churn risk drives both the old targeting rule and the
+# outcome, and it is not in the data. Only the randomized pilot can notice.
+name: hidden_confounder
+confounding_strength: 0.9
+overlap_tilt: 1.0
+hidden_confounder_strength: 2.0
+nonlinear: false
+n_customers: 2000
+seed: 20260505
+pilot_fraction: 0.2
+outcome_noise_sd: 45.0
+direct_effect: [14.0, 18.0, -26.0, 9.0]
+mediator_effect: 4.0
+mediator_coefficient: 5.0
+offer_cost: 12.0
