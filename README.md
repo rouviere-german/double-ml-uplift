@@ -334,6 +334,14 @@ Recorded honestly rather than quietly dropped:
   [ADR 0004](docs/adr/0004-bundles-instead-of-mlflow.md).
 - **Polars is not used.** The frames are small enough that pandas plus the pandera contract
   already covers the work, and one dataframe library is simpler to reason about than two.
+- **networkx is not used.** The DAG, d-separation and the backdoor criterion are implemented in
+  `causal/graph.py` instead — roughly 250 lines — precisely so the repository's own tests can
+  check them against brute-force enumeration of every simple trail. Depending on a library for
+  the one piece of logic the project is meant to demonstrate would have made that test vacuous.
+  The dependency was dropped rather than left declared and unused.
+- **statsmodels is a development dependency, not a runtime one.** It is used by exactly one test,
+  the Frisch-Waugh-Lovell differential, where it is the independent implementation that DML is
+  pinned against. Shipping it in the service image would add weight nothing at runtime calls.
 - **The Monte Carlo report runs 50 replications, not 200.** 50 is what fits in CI minutes on a
   6-CPU CPU-only machine; `--replications 200` is supported and the tolerance bands narrow
   automatically with the replication count.
