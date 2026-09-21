@@ -457,6 +457,17 @@ def test_an_export_needs_an_estimate_first(client: TestClient, operator: dict[st
     assert request_export(client, operator).status_code == 409
 
 
+def test_releasing_before_any_plan_exists_is_refused(
+    client: TestClient, analyst: dict[str, str], operator: dict[str, str]
+) -> None:
+    assert estimate(client, analyst).status_code == 200
+    response = client.post(
+        "/v1/targeting/export", json={"request_id": "exp_" + "0" * 32}, headers=operator
+    )
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "no_targeting_plan"
+
+
 def test_metrics_require_an_api_key_not_a_role_token(
     client: TestClient, analyst: dict[str, str]
 ) -> None:

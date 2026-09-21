@@ -134,6 +134,35 @@ def test_an_expired_record_that_is_still_stored_is_refused_on_its_own_terms(
         subject.decide(record.request_id, "operator-b", approve=True)
 
 
+def test_a_decision_is_made_once(tmp_path: Path) -> None:
+    subject = store(tmp_path)
+    record = subject.request("operator-a", payload())
+    subject.decide(record.request_id, "operator-b", approve=True)
+    with pytest.raises(ApprovalError, match="already approved"):
+        subject.decide(record.request_id, "operator-b", approve=False)
+
+
+def test_consuming_an_unknown_or_expired_approval_is_refused(tmp_path: Path) -> None:
+    clock = Clock()
+    subject = store(tmp_path, ttl_seconds=60.0, clock=clock)
+    with pytest.raises(ApprovalError, match="unknown export request"):
+        subject.consume("exp_" + "0" * 32, "operator-a", payload())
+
+    record = subject.request("operator-a", payload())
+    subject.decide(record.request_id, "operator-b", approve=True)
+    clock.advance(61.0)
+    with pytest.raises(ApprovalError, match="approval has expired"):
+        subject.consume(record.request_id, "operator-a", payload())
+
+
+def test_a_store_file_that_is_not_an_object_is_refused(tmp_path: Path) -> None:
+    """A corrupted or hand-edited store is an error, not an empty store that silently forgets."""
+    subject = store(tmp_path)
+    subject.path.write_text("[]", encoding="utf-8")
+    with pytest.raises(ApprovalError, match="not a JSON object"):
+        subject.get("exp_" + "0" * 32)
+
+
 def test_the_cap_is_validated(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="max_records must be positive"):
         store(tmp_path, max_records=0)
