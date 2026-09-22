@@ -242,9 +242,13 @@ jobs:
           push: false
           tags: ${{ env.IMAGE }}
       - name: container smoke test (HEALTHCHECK reports healthy)
+        # The service refuses to start without a pepper, and with a read-only root filesystem
+        # /data (APP_DATA_DIR) must be a separate writable mount, as the compose volume is.
         run: |
-          docker run --detach --name app --read-only --tmpfs /tmp --cap-drop ALL \
-            --security-opt no-new-privileges --health-interval 3s "$IMAGE"
+          docker run --detach --name app --read-only --tmpfs /tmp \
+            --tmpfs /data:uid=10001,gid=10001,mode=0750 --cap-drop ALL \
+            --security-opt no-new-privileges --health-interval 3s \
+            --env APP_CUSTOMER_ID_PEPPER=ci-smoke-test-only "$IMAGE"
           for _ in $(seq 1 30); do
             status="$(docker inspect --format '{{.State.Health.Status}}' app)"
             if [ "$status" = "healthy" ]; then

@@ -25,15 +25,20 @@ RUN uv sync --frozen --no-dev --no-editable
 FROM ${PYTHON_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="double-ml-uplift" \
       org.opencontainers.image.licenses="MIT"
+# /data is the only directory the service writes (approvals, audit chain, model registry). It is
+# created here and owned by the runtime user: the relative default APP_DATA_DIR=var would resolve
+# to the root-owned /app/var, and a fresh named volume mounted at /data copies this ownership.
 RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --no-create-home --home-dir /nonexistent \
-       --shell /usr/sbin/nologin app
+       --shell /usr/sbin/nologin app \
+    && install -d -o 10001 -g 10001 -m 0750 /data
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     APP_HOST=0.0.0.0 \
-    APP_PORT=8000
+    APP_PORT=8000 \
+    APP_DATA_DIR=/data
 WORKDIR /app
 USER 10001:10001
 EXPOSE 8000
