@@ -173,7 +173,9 @@ attribute (see Ethical considerations).
   block is written to the audit chain along with the ranking that caused it. This is
   **demographic parity on one binary attribute** — one definition among
   several, and it says nothing about intersectional disparity or about whether the underlying
-  effect estimates are equally accurate in both groups.
+  effect estimates are equally accurate in both groups. A specification that declares no
+  protected attribute is not checked at all; the check then says so (`checked: false`, no
+  disparity) instead of reporting a `0.0` that would read like a perfectly balanced list.
 - **Privacy.** Customer ids appear only as `cid_<40 hex>` = HMAC-SHA256(pepper, id). The service
   refuses to start without a pepper. Aggregates below `APP_MIN_COHORT_SIZE` are refused. Bundles
   keep model parameters and a capped propensity sample, not the training data.

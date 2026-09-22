@@ -216,21 +216,37 @@ def build_plan(
 
 @dataclass(frozen=True, slots=True)
 class FairnessCheck:
-    """Demographic-parity check on who receives the offer."""
+    """Demographic-parity check on who receives the offer.
+
+    ``checked`` is false when there was nothing to measure -- the specification declares no
+    protected attribute. Such a check never blocks, and :meth:`to_dict` reports its disparity and
+    rates as ``None`` rather than as zeros: ``0.0`` would read exactly like a perfectly balanced
+    list, which is an invented number, not a measurement.
+    """
 
     disparity: float
     threshold: float
     blocked: bool
     rate_protected: float
     rate_other: float
+    checked: bool = True
+
+    @classmethod
+    def not_checked(cls, threshold: float) -> FairnessCheck:
+        """The check for a population with no declared protected attribute."""
+        return cls(0.0, threshold, False, 0.0, 0.0, checked=False)
 
     def to_dict(self) -> dict[str, object]:
+        def measured(value: float) -> float | None:
+            return round(value, 6) if self.checked else None
+
         return {
-            "disparity": round(self.disparity, 6),
+            "checked": self.checked,
+            "disparity": measured(self.disparity),
             "threshold": self.threshold,
             "blocked": self.blocked,
-            "rate_protected": round(self.rate_protected, 6),
-            "rate_other": round(self.rate_other, 6),
+            "rate_protected": measured(self.rate_protected),
+            "rate_other": measured(self.rate_other),
         }
 
 

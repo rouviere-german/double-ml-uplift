@@ -9,6 +9,7 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 from double_ml_uplift.causal.targeting import (
+    FairnessCheck,
     allocation_disparity,
     build_plan,
     fairness_check,
@@ -243,6 +244,26 @@ def test_a_single_group_population_cannot_be_disparate() -> None:
     disparity, rate_in, rate_out = allocation_disparity(selected, protected)
     assert disparity == 0.0
     assert rate_in == rate_out == pytest.approx(0.75)
+
+
+def test_a_measured_check_says_so_and_an_unmeasured_one_reports_no_numbers() -> None:
+    selected = np.array([True, False, True, False])
+    protected = np.array([1, 1, 0, 0], dtype=np.int64)
+    measured = fairness_check(selected, protected, threshold=0.15)
+    assert measured.checked is True
+    assert measured.to_dict()["checked"] is True
+
+    unmeasured = FairnessCheck.not_checked(0.15)
+    assert unmeasured.checked is False
+    assert unmeasured.blocked is False
+    assert unmeasured.to_dict() == {
+        "checked": False,
+        "disparity": None,
+        "threshold": 0.15,
+        "blocked": False,
+        "rate_protected": None,
+        "rate_other": None,
+    }
 
 
 def test_fairness_inputs_are_validated() -> None:

@@ -439,7 +439,7 @@ class UpliftEngine:
             name: (
                 fairness_check(plan.selected, protected, threshold=fairness_threshold)
                 if protected is not None
-                else FairnessCheck(0.0, fairness_threshold, False, 0.0, 0.0)
+                else FairnessCheck.not_checked(fairness_threshold)
             )
             for name, plan in plans.items()
         }

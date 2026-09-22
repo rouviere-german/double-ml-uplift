@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import numpy as np
 import pandas as pd
@@ -351,6 +352,30 @@ def test_every_plan_carries_its_own_fairness_check(
     document = outcome.to_dict()["fairness"]
     assert isinstance(document, dict)
     assert set(document) == set(outcome.plans)
+
+
+def test_without_a_protected_attribute_the_fairness_check_says_it_did_not_run(
+    spec: CausalSpec, fitted: EstimationResult
+) -> None:
+    """No protected attribute means nothing was measured, so no disparity may be reported.
+
+    Reporting ``disparity: 0.0`` with both rates at zero would be an invented number that reads
+    exactly like a perfectly fair list -- the same fail-open shape as a skipped refuter reported
+    as passed. The check must say it did not run.
+    """
+    engine = UpliftEngine(spec, FAST)
+    unprotected = replace(fitted, prepared=replace(fitted.prepared, protected=None))
+    outcome = engine.target(unprotected, budget_fraction=0.2)
+    assert set(outcome.fairness) == set(outcome.plans)
+    for check in outcome.fairness.values():
+        assert check.checked is False
+        assert check.blocked is False
+        document = check.to_dict()
+        assert document["checked"] is False
+        assert document["disparity"] is None
+        assert document["rate_protected"] is None
+        assert document["rate_other"] is None
+    assert all(check.checked for check in engine.target(fitted).fairness.values())
 
 
 # --- serving --------------------------------------------------------------------------------------
