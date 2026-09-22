@@ -221,7 +221,7 @@
     "mean_true_value_propensity": -6.4054,
     "mean_true_value_treat_all": 3.436
   },
-  "seconds": 184.3,
+  "seconds": 217.6,
   "machine": {
     "platform": "Windows-10-10.0.19045-SP0",
     "python": "3.12.14",

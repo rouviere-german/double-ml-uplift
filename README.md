@@ -26,7 +26,8 @@ assumptions should be written down, checked where they are checkable, and allowe
 - **overlap and balance diagnostics** gate the estimate, and a failure raises instead of
   returning a number;
 - **refuters** (placebo, random common cause, subset stability, randomized-pilot consistency) and
-  an **E-value** are stored with every estimate;
+  an **E-value** are stored with every estimate, and a refuter that could not run is reported as
+  `skipped` and withholds the pass rather than granting it;
 - **targeting value** is estimated on a randomized pilot slice, not on the observational data the
   model was trained on;
 - exporting a list of real customers needs a **second operator's approval** and is hash-chain
@@ -115,7 +116,7 @@ export UV_PROJECT_ENVIRONMENT=~/.venvs/double-ml-uplift
 uv sync
 
 uv run python tasks.py demo        # the whole story, offline, ~10 s
-uv run python tasks.py test        # 600+ tests with coverage
+uv run python tasks.py test        # 640+ tests with coverage
 uv run python tasks.py lint typecheck audit baseline
 uv run python tasks.py bench       # micro-benchmarks + 50-replication Monte Carlo
 ```
@@ -127,7 +128,9 @@ specification refused at load, a frame carrying potential outcomes refused by th
 mediator refused by the leakage guard, an unmeasured common cause refused by identification, the
 naive estimate missing the truth while AIPW and DML recover it, a positivity-violating campaign
 refused by the overlap gate, an unmeasured confounder caught by the randomized pilot, a targeting
-list held for a second operator's approval, and a tampered model artifact refused on load.
+list held for a second operator's approval, a tampered model artifact refused on load, and the
+run published to the content-addressed registry, read back, and a corrupted blob caught. It
+writes to `var/demo` and can be re-run in place.
 
 Inspect a bundled specification and what it identifies:
 
@@ -154,7 +157,7 @@ CPU only, no GPU. Reproduce with the commands shown above each table.
 uv run python bench/bench_montecarlo.py --replications 50 --check
 ```
 
-50 replications per scenario, n = 2,000, 184.3 s total. The gate is measured but not enforced
+50 replications per scenario, n = 2,000, 217.6 s total. The gate is measured but not enforced
 here, on purpose: the point is to show what it protects against.
 
 | scenario | estimator | bias | RMSE | empirical SD | mean SE | coverage |
@@ -247,24 +250,24 @@ uv run python bench/bench_baseline.py --check --rows 200000
 
 | benchmark | runs | p50 (us) | p95 (us) |
 |---|---:|---:|---:|
-| d_separation_24_node_dag | 2000 | 44.0 | 44.6 |
-| identify_backdoor_retention_spec | 200 | 239.4 | 242.4 |
-| fold_assignment_100k_ids | 10 | 112196.8 | 119260.3 |
-| cross_fit_10k_rows_5_folds_gbm | 5 | 768345.2 | 777524.1 |
-| score_10k_rows | 20 | 12017.0 | 13912.5 |
-| drift_check_10k_vs_10k | 30 | 2185.3 | 2336.8 |
-| audit_append_fsync | 100 | 6820.7 | 7908.9 |
-| audit_verify_500_entries | 10 | 8747.5 | 9940.8 |
+| d_separation_24_node_dag | 2000 | 49.2 | 61.1 |
+| identify_backdoor_retention_spec | 200 | 253.8 | 361.8 |
+| fold_assignment_100k_ids | 10 | 114888.8 | 126860.5 |
+| cross_fit_10k_rows_5_folds_gbm | 5 | 872059.4 | 1023900.5 |
+| score_10k_rows | 20 | 12057.5 | 14136.7 |
+| drift_check_10k_vs_10k | 30 | 2156.8 | 2248.0 |
+| audit_append_fsync | 100 | 6986.0 | 8125.3 |
+| audit_verify_500_entries | 10 | 9904.4 | 13335.3 |
 
 One full five-fold DML pass end to end, at 200,000 rows and six adjustment columns:
 
 | scaling (200,000 rows, 5-fold DML) | prepare (s) | fit (s) | ATE | SE |
 |---|---:|---:|---:|---:|
-| ridge nuisances | 0.214 | 1.616 | 22.5772 | 0.2300 |
-| gbm nuisances | 0.213 | 16.374 | 22.2267 | 0.2382 |
+| ridge nuisances | 0.237 | 1.712 | 22.5772 | 0.2300 |
+| gbm nuisances | 0.260 | 17.046 | 22.2267 | 0.2382 |
 
 True ATE for that sample: **22.3984**. Both configurations recover it; the LightGBM nuisances
-cost about eight times the wall clock of ridge for this (linear) scenario and earn it back on the
+cost about ten times the wall clock of ridge for this (linear) scenario and earn it back on the
 `nonlinear` one. `bench/thresholds.json` sets each p95 limit at roughly five times the measured
 value, so CI catches an order-of-magnitude regression without failing on runner noise. The
 scaling section is reported, not thresholded: the machine matters far more than the code.
@@ -296,7 +299,8 @@ names the test that holds it. The ones specific to this system:
 - **Allocation fairness.** Every ranking is checked separately, and the list actually being
   released is the list that is judged: a targeting list whose selection rates differ between the
   protected groups by more than `APP_FAIRNESS_MAX_DISPARITY` is blocked before release, and the
-  block is audited with the ranking that caused it.
+  block is audited with the ranking that caused it. A specification with no protected attribute
+  reports `checked: false` rather than an invented disparity of zero.
 - **Tamper-evident audit.** Every export request, decision, refusal and release is one JSON line
   whose digest covers the previous digest; records are redacted before they are hashed.
 - **No pickle anywhere.** Models are LightGBM text dumps or JSON coefficients, each carrying its
