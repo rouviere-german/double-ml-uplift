@@ -44,6 +44,28 @@ def test_tampered_blob_is_detected(tmp_path: Path, manifest: RunManifest) -> Non
         registry.load_files(version)
 
 
+def test_registering_the_same_content_again_repairs_a_corrupted_blob(
+    tmp_path: Path, manifest: RunManifest
+) -> None:
+    """The address says what the bytes must be, so a damaged blob is rewritten, not re-used.
+
+    Skipping the write because *a* file exists at the address would hand the damage on to every
+    later version with the same content, and none of them could ever be loaded.
+    """
+    registry = ModelRegistry(tmp_path)
+    first = registry.register("m", {"w.bin": b"original"}, manifest)
+    blob = first.files["w.bin"]
+    (tmp_path / "blobs" / "sha256" / blob[:2] / blob).write_bytes(b"tampered")
+    with pytest.raises(RegistryIntegrityError):
+        registry.load_files(first)
+
+    second = registry.register("m", {"w.bin": b"original"}, manifest, metrics={"auc": 0.9})
+
+    assert second.files["w.bin"] == blob
+    assert registry.load_files(second) == {"w.bin": b"original"}
+    assert registry.load_files(first) == {"w.bin": b"original"}
+
+
 def test_tampered_version_record_is_detected(tmp_path: Path, manifest: RunManifest) -> None:
     registry = ModelRegistry(tmp_path)
     version = registry.register("m", {"w.bin": b"data"}, manifest, metrics={"auc": 0.5})

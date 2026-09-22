@@ -210,7 +210,8 @@ def _registry_round_trip(
         metrics=manifest.metrics,
         lockfile=find_lockfile(),
     )
-    version = publish_run(registry, manifest, artifacts, run)
+    # The CLI workdir persists between runs, so keep the demo registry as bounded as the service.
+    version = publish_run(registry, manifest, artifacts, run, keep=3)
     restored = load_published_bundle(registry, "latest")
     from_registry, _, _ = restored.predict(result.prepared.features[:64])
     direct, _, _ = engine.score_features(result, result.prepared.features[:64])

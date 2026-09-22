@@ -88,9 +88,15 @@ class ModelRegistry:
         return self.root / "models" / _check_name("model name", name, _NAME)
 
     def put_blob(self, data: bytes) -> str:
+        """Store ``data`` under its SHA-256 and return the digest.
+
+        An existing file at that address is re-used only while it still holds exactly these
+        bytes. A damaged one is rewritten: the address alone says what it must contain, and
+        re-using it would hand the damage on to every later version with the same content.
+        """
         digest = sha256_hex(data)
         path = self._blob_path(digest)
-        if not path.exists():
+        if not path.exists() or path.read_bytes() != data:
             atomic_write_bytes(path, data)
         return digest
 

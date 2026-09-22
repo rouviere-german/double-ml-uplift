@@ -21,8 +21,13 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture(scope="module")
-def demo(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    return run_uplift_demo(tmp_path_factory.mktemp("demo"))
+def demo_workdir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("demo")
+
+
+@pytest.fixture(scope="module")
+def demo(demo_workdir: Path) -> dict[str, Any]:
+    return run_uplift_demo(demo_workdir)
 
 
 # --- the story the demo tells -------------------------------------------------------------------
@@ -127,6 +132,19 @@ def test_the_demo_publishes_the_run_and_reads_it_back_through_its_content_addres
     assert len(recorded["fold_digest"]) == 16
     # The demo runs from the checkout, so the lockfile is visible and its digest is recorded.
     assert recorded["lockfile_sha256"] is not None
+
+
+def test_the_demo_can_run_again_in_the_workdir_it_already_damaged(
+    demo: dict[str, Any], demo_workdir: Path
+) -> None:
+    """The CLI's default workdir (``var/demo``) persists between runs, and the demo deliberately
+    corrupts one registry blob. A second run publishes the same content again, so it must still
+    read its own run back and still catch the corruption, rather than trip over the first run's
+    damage."""
+    assert demo["bundle"]["registry"]["corrupted_blob_refused"] is True
+    again = run_uplift_demo(demo_workdir)["bundle"]["registry"]
+    assert again["predictions_match"] is True
+    assert again["corrupted_blob_refused"] is True
 
 
 def test_the_demo_shows_the_dr_learner_beating_both_baselines(demo: dict[str, Any]) -> None:
