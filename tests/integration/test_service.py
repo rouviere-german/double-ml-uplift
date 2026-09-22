@@ -234,6 +234,32 @@ def test_an_estimate_is_recorded_in_the_registry_it_reports(
     ]
 
 
+def test_the_registry_keeps_only_the_configured_number_of_runs(
+    tmp_path: Path, analyst: dict[str, str]
+) -> None:
+    """Every successful estimate publishes a bundle, so the registry needs a retention cap.
+
+    Without one, anyone allowed to estimate grows the data directory by one bundle per request
+    until the disk is full.
+    """
+    settings = make_settings(tmp_path, registry_keep_versions=2)
+    app = create_service_app(
+        bundled_spec("retention_offer"),
+        settings=settings,
+        config=CONFIG,
+        registry=CollectorRegistry(),
+    )
+    with TestClient(app, raise_server_exceptions=False) as scoped:
+        answers = [estimate(scoped, analyst).json()["run_version"] for _ in range(3)]
+
+    registry = ModelRegistry(tmp_path / "registry")
+    kept = registry.versions(MODEL_NAME)
+    assert len(kept) == 2
+    assert answers[-1] in kept
+    assert answers[0] not in kept
+    assert registry.get(MODEL_NAME, "latest").digest == answers[-1]
+
+
 def test_a_deployment_salt_changes_the_folds_and_only_its_hash_leaves_the_process(
     tmp_path: Path, analyst: dict[str, str]
 ) -> None:

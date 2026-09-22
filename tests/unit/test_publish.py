@@ -162,3 +162,26 @@ def test_publishing_without_an_alias_leaves_the_alias_alone(
     assert registry.versions(MODEL_NAME) == [version.digest]
     with pytest.raises(RegistryError, match="unknown alias"):
         load_published_bundle(registry, "latest")
+
+
+def test_a_retention_cap_bounds_the_registry_and_keeps_the_latest_run_loadable(
+    published: Published, tmp_path: Path
+) -> None:
+    """Every estimate publishes, so without a cap the registry grows by one bundle per request."""
+    engine, result, manifest, artifacts = published
+    registry = ModelRegistry(tmp_path / "registry")
+    versions = [
+        publish_run(
+            registry,
+            manifest,
+            artifacts,
+            run_manifest(result, seed=engine.config.seed, run_id=f"run-{index}"),
+            keep=2,
+        )
+        for index in range(4)
+    ]
+
+    assert len(registry.versions(MODEL_NAME)) == 2
+    assert registry.get(MODEL_NAME, "latest").digest == versions[-1].digest
+    restored = load_published_bundle(registry, "latest")
+    assert restored.manifest.sha256() == manifest.sha256()

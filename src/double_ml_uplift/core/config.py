@@ -91,6 +91,9 @@ class Settings(BaseSettings):
 
     # --- storage ---
     data_dir: Path = Path("var")
+    # Every successful estimation is published to the registry under data_dir; this many of the
+    # newest runs are kept (plus whatever an alias points at), so the directory stays bounded.
+    registry_keep_versions: int = Field(default=20, ge=1, le=10_000)
 
     @field_validator("api_key_sha256", mode="before")
     @classmethod

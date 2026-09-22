@@ -39,3 +39,6 @@ upstream).
   already-decided records first, and a request that would evict a live one is refused with
   `503 approval_store_full`, so no operator can flush another operator's pending approval out of
   the store.
+- Every successful estimation is published to the local model registry, which keeps only the
+  newest `APP_REGISTRY_KEEP_VERSIONS` runs (default 20) plus alias targets, so repeated
+  estimations cannot fill the disk.

@@ -8,6 +8,14 @@ Layout under ``root``::
 
 A version digest is the SHA-256 of the canonical record, so identical content always yields the
 same version and any edit to a record or blob is detected on load.
+
+Retention: :meth:`ModelRegistry.prune` keeps the newest ``keep`` versions of a model plus every
+version an alias points at, then deletes the blobs that no remaining version of *any* model
+references. A caller that registers on every request (the service publishes every successful
+estimate) must prune, or the directory grows by one bundle per request. Writers and the pruner
+share one advisory lock, so a blob that a concurrent ``register`` has just re-used is never
+collected underneath it. A record that fails verification is never deleted, and while one exists
+blob collection is skipped entirely: its references are unknown, so no blob can be proven orphaned.
 """
 
 from __future__ import annotations
@@ -15,12 +23,13 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 from double_ml_uplift.core.canonical import canonical_json, sha256_hex
-from double_ml_uplift.core.fileio import atomic_write_bytes, atomic_write_text
+from double_ml_uplift.core.fileio import atomic_write_bytes, atomic_write_text, file_lock
 from double_ml_uplift.ml.manifest import RunManifest
 
 __all__ = ["ModelRegistry", "ModelVersion", "RegistryError", "RegistryIntegrityError"]
@@ -54,9 +63,22 @@ def _check_name(kind: str, value: str, pattern: re.Pattern[str]) -> str:
     return value
 
 
+def _created_at(version: ModelVersion) -> datetime:
+    """Order versions by when their run was recorded; an unparseable stamp sorts oldest."""
+    try:
+        stamp = datetime.fromisoformat(version.manifest.created_at)
+    except ValueError:
+        return datetime.min.replace(tzinfo=UTC)
+    return stamp if stamp.tzinfo is not None else stamp.replace(tzinfo=UTC)
+
+
 class ModelRegistry:
     def __init__(self, root: Path) -> None:
         self.root = root
+
+    def _lock(self) -> Path:
+        # ``file_lock`` takes its lock on the sidecar ``registry.lock`` next to this path.
+        return self.root / "registry"
 
     def _blob_path(self, digest: str) -> Path:
         _check_name("digest", digest, _DIGEST)
@@ -91,21 +113,27 @@ class ModelRegistry:
         model_dir = self._model_dir(name)
         if not files:
             raise RegistryError("a model version needs at least one file")
-        blob_refs = {
-            _check_name("file name", file_name, _FILE): self.put_blob(data)
-            for file_name, data in sorted(files.items())
+        # Every name is checked before any byte is written, so a bad name leaves no orphan blob.
+        checked = {
+            _check_name("file name", file_name, _FILE): data for file_name, data in files.items()
         }
-        record: dict[str, JsonValue] = {
-            "name": name,
-            "files": dict(blob_refs),
-            "manifest": manifest.model_dump(mode="json"),
-            "metrics": dict(metrics or {}),
-        }
-        digest = sha256_hex(canonical_json(record))
-        version = ModelVersion.model_validate({**record, "digest": digest})
-        path = model_dir / "versions" / f"{digest}.json"
-        if not path.exists():
-            atomic_write_text(path, version.model_dump_json(indent=2) + "\n")
+        # Held across the blob writes and the record write: ``put_blob`` skips a blob that already
+        # exists, so without the lock ``prune`` could collect it between the skip and the record.
+        with file_lock(self._lock()):
+            blob_refs = {
+                file_name: self.put_blob(data) for file_name, data in sorted(checked.items())
+            }
+            record: dict[str, JsonValue] = {
+                "name": name,
+                "files": dict(blob_refs),
+                "manifest": manifest.model_dump(mode="json"),
+                "metrics": dict(metrics or {}),
+            }
+            digest = sha256_hex(canonical_json(record))
+            version = ModelVersion.model_validate({**record, "digest": digest})
+            path = model_dir / "versions" / f"{digest}.json"
+            if not path.exists():
+                atomic_write_text(path, version.model_dump_json(indent=2) + "\n")
         return version
 
     def versions(self, name: str) -> list[str]:
@@ -148,3 +176,53 @@ class ModelRegistry:
 
     def load_files(self, version: ModelVersion) -> dict[str, bytes]:
         return {file_name: self.read_blob(blob) for file_name, blob in version.files.items()}
+
+    # --- retention -----------------------------------------------------------------------
+
+    def _readable_versions(self) -> tuple[dict[str, list[ModelVersion]], bool]:
+        """Every verifiable version of every model, and whether any record failed to verify."""
+        found: dict[str, list[ModelVersion]] = {}
+        unreadable = False
+        models = self.root / "models"
+        for model_dir in sorted(models.iterdir()) if models.is_dir() else []:
+            try:
+                digests = self.versions(model_dir.name)
+            except RegistryError:
+                # Not a name ``register`` could have written, so whatever it holds is unknown.
+                unreadable = True
+                continue
+            for digest in digests:
+                try:
+                    found.setdefault(model_dir.name, []).append(self.get(model_dir.name, digest))
+                except (RegistryError, ValueError):
+                    unreadable = True
+        return found, unreadable
+
+    def prune(self, name: str, *, keep: int) -> list[str]:
+        """Delete all but the newest ``keep`` versions of ``name`` and the blobs left orphaned.
+
+        A version an alias points at always survives as well, even when it is older than the
+        newest ``keep``. Returns the digests of the version records removed, oldest first.
+        """
+        if keep < 1:
+            raise RegistryError("keep must be at least 1")
+        versions_dir = self._model_dir(name) / "versions"
+        with file_lock(self._lock()):
+            found, unreadable = self._readable_versions()
+            pinned = set(self._aliases(name).values())
+            ordered = sorted(found.get(name, []), key=lambda item: (_created_at(item), item.digest))
+            doomed = [item for item in ordered[:-keep] if item.digest not in pinned]
+            for item in doomed:
+                (versions_dir / f"{item.digest}.json").unlink(missing_ok=True)
+            if not unreadable and doomed:
+                gone = {item.digest for item in doomed}
+                live = {
+                    blob
+                    for items in found.values()
+                    for item in items
+                    if item.digest not in gone
+                    for blob in item.files.values()
+                }
+                for blob in {blob for item in doomed for blob in item.files.values()} - live:
+                    self._blob_path(blob).unlink(missing_ok=True)
+        return [item.digest for item in doomed]

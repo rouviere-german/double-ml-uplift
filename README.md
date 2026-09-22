@@ -302,7 +302,10 @@ names the test that holds it. The ones specific to this system:
 - **No pickle anywhere.** Models are LightGBM text dumps or JSON coefficients, each carrying its
   SHA-256, verified on load. Enforced by a test, a semgrep rule and `scripts/check_baseline.py`.
 - **Caps.** Upload rows and columns, folds per request, bootstrap iterations per request,
-  customers per scoring batch, request body size and a token-bucket rate limit.
+  customers per scoring batch, request body size and a token-bucket rate limit. The model
+  registry every estimate publishes to keeps only the newest `APP_REGISTRY_KEEP_VERSIONS` runs
+  (default 20) plus alias targets, and the approval store refuses a request rather than evict a
+  live one, so neither grows without bound.
 
 ## Non-goals
 
@@ -322,7 +325,7 @@ names the test that holds it. The ones specific to this system:
   successful estimation. Every successful estimation *is* published to a local content-addressed
   registry with its run manifest, and the response returns the version digest, but there is no
   multi-tenancy, no experiment UI and no background retraining: comparing twenty runs means
-  reading twenty manifests. MLflow is **not** wired in — see "Deviations" below.
+  reading twenty manifests, and only the newest `APP_REGISTRY_KEEP_VERSIONS` runs are kept. MLflow is **not** wired in — see "Deviations" below.
 - **Clustered, panel or weighted sampling.** Rows are assumed independent. Influence-function
   standard errors and the multiplier bootstrap both assume it.
 - **Production authentication.** Tokens are verified, never minted, in production paths.

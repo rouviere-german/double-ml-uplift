@@ -148,18 +148,25 @@ def publish_run(
     *,
     name: str = MODEL_NAME,
     alias: str | None = "latest",
+    keep: int | None = None,
 ) -> ModelVersion:
     """Store the bundle and its run manifest, and point ``alias`` at the resulting version.
 
     The bundle manifest travels as one more artifact, so ``load_published_bundle`` can rebuild a
     scoring bundle from the registry alone -- the version record carries no model structure of
     its own, only digests.
+
+    ``keep`` bounds the registry: after publishing, all but the newest ``keep`` versions are
+    pruned (alias targets always survive) together with the blobs only they referenced. A caller
+    that publishes on every request must pass it, or the directory grows by one bundle per call.
     """
     files = dict(artifacts)
     files[BUNDLE_MANIFEST_FILE] = manifest.model_dump_json(indent=2).encode("utf-8")
     version = registry.register(name, files, run, metrics=finite_metrics(manifest.metrics))
     if alias is not None:
         registry.set_alias(name, alias, version.digest)
+    if keep is not None:
+        registry.prune(name, keep=keep)
     return version
 
 

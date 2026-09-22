@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -75,3 +76,115 @@ def test_unknown_references_and_empty_versions(tmp_path: Path, manifest: RunMani
         registry.get("m", "0" * 64)
     with pytest.raises(RegistryError, match="unknown version"):
         registry.set_alias("m", "production", "0" * 64)
+
+
+# --- retention ----------------------------------------------------------------------------------
+
+
+def _manifest_at(run_id: str, minute: int) -> RunManifest:
+    stamp = datetime(2026, 1, 1, 0, minute, tzinfo=UTC)
+    return create_manifest(seed=1, datasets=[], run_id=run_id, packages=[], clock=lambda: stamp)
+
+
+def _blob_path(root: Path, digest: str) -> Path:
+    return root / "blobs" / "sha256" / digest[:2] / digest
+
+
+def test_prune_keeps_the_newest_versions_and_every_alias_target(tmp_path: Path) -> None:
+    """Retention bounds the directory without ever deleting what an alias points at."""
+    registry = ModelRegistry(tmp_path)
+    versions = [
+        registry.register("m", {"w.bin": f"weights-{i}".encode()}, _manifest_at(f"run-{i}", i))
+        for i in range(5)
+    ]
+    registry.set_alias("m", "production", versions[0].digest)  # the oldest, but pinned
+
+    removed = registry.prune("m", keep=2)
+
+    assert sorted(removed) == sorted(item.digest for item in versions[1:3])
+    survivors = {versions[0].digest, versions[3].digest, versions[4].digest}
+    assert set(registry.versions("m")) == survivors
+    for gone in versions[1:3]:
+        assert not _blob_path(tmp_path, gone.files["w.bin"]).exists()
+    for index in (0, 3, 4):
+        kept = registry.get("m", versions[index].digest)
+        assert registry.load_files(kept) == {"w.bin": f"weights-{index}".encode()}
+    assert registry.get("m", "production").digest == versions[0].digest
+
+
+def test_prune_keeps_a_blob_that_any_surviving_version_still_references(tmp_path: Path) -> None:
+    """Blobs are shared by content, across versions and across models; only orphans go."""
+    registry = ModelRegistry(tmp_path)
+    old = registry.register(
+        "m", {"w.bin": b"shared-weights", "x.bin": b"old-only"}, _manifest_at("a", 0)
+    )
+    new = registry.register("m", {"w.bin": b"shared-weights"}, _manifest_at("b", 1))
+    other = registry.register("other", {"w.bin": b"old-only"}, _manifest_at("c", 0))
+    lonely = registry.register("m", {"w.bin": b"nobody-else"}, _manifest_at("d", 0))
+
+    registry.prune("m", keep=1)
+
+    assert registry.versions("m") == [new.digest]
+    assert registry.load_files(new) == {"w.bin": b"shared-weights"}
+    # ``x.bin`` of the pruned version is still what model "other" is made of.
+    assert registry.load_files(registry.get("other", other.digest)) == {"w.bin": b"old-only"}
+    assert _blob_path(tmp_path, old.files["x.bin"]).exists()
+    assert not _blob_path(tmp_path, lonely.files["w.bin"]).exists()
+
+
+def test_prune_never_deletes_what_it_cannot_read(tmp_path: Path) -> None:
+    """A record that fails verification is evidence, and its references are unknown.
+
+    It is neither counted nor deleted, and blob collection is skipped for the whole pass, because
+    a blob that looks orphaned may be exactly what the unreadable record points at.
+    """
+    registry = ModelRegistry(tmp_path)
+    broken = registry.register("m", {"w.bin": b"broken-weights"}, _manifest_at("a", 0))
+    stale = registry.register("m", {"w.bin": b"stale-weights"}, _manifest_at("b", 1))
+    newest = registry.register("m", {"w.bin": b"newest-weights"}, _manifest_at("c", 2))
+    record_path = tmp_path / "models" / "m" / "versions" / f"{broken.digest}.json"
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["metrics"]["forged"] = 1.0
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    removed = registry.prune("m", keep=1)
+
+    assert removed == [stale.digest]
+    assert set(registry.versions("m")) == {broken.digest, newest.digest}
+    assert _blob_path(tmp_path, broken.files["w.bin"]).exists()
+    assert _blob_path(tmp_path, stale.files["w.bin"]).exists()
+
+
+def test_prune_validates_its_arguments(tmp_path: Path) -> None:
+    registry = ModelRegistry(tmp_path)
+    with pytest.raises(RegistryError, match="keep"):
+        registry.prune("m", keep=0)
+    assert registry.prune("never-registered", keep=1) == []
+
+
+def test_prune_orders_by_recorded_time_even_when_a_stamp_is_naive_or_garbled(
+    tmp_path: Path,
+) -> None:
+    """A naive stamp is read as UTC and a garbled one sorts oldest, so neither crashes a prune."""
+    registry = ModelRegistry(tmp_path)
+    base = create_manifest(seed=1, datasets=[], run_id="base", packages=[])
+
+    def at(stamp: str) -> RunManifest:
+        return base.model_copy(update={"created_at": stamp, "run_id": stamp})
+
+    garbled = registry.register("m", {"w.bin": b"g"}, at("yesterday"))
+    naive = registry.register("m", {"w.bin": b"n"}, at("2026-01-01T00:05:00"))
+    registry.register("m", {"w.bin": b"a"}, at("2026-01-01T00:10:00+00:00"))
+
+    assert registry.prune("m", keep=1) == [garbled.digest, naive.digest]
+
+
+def test_a_stray_directory_under_models_suspends_blob_collection(tmp_path: Path) -> None:
+    """Something the registry did not write may reference any blob, so none is proven orphaned."""
+    registry = ModelRegistry(tmp_path)
+    old = registry.register("m", {"w.bin": b"old"}, _manifest_at("a", 0))
+    registry.register("m", {"w.bin": b"new"}, _manifest_at("b", 1))
+    (tmp_path / "models" / "Not A Model").mkdir()
+
+    assert registry.prune("m", keep=1) == [old.digest]
+    assert _blob_path(tmp_path, old.files["w.bin"]).exists()

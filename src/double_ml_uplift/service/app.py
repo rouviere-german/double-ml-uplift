@@ -229,6 +229,8 @@ def build_router() -> APIRouter:  # noqa: PLR0915 - one router, one route per en
                 metrics=manifest.metrics,
                 lockfile=state.lockfile,
             ),
+            # Every success publishes, so without a cap the data directory grows per request.
+            keep=state.settings.registry_keep_versions,
         )
         state.result = result
         state.bundle = ScoringBundle.load(manifest, artifacts)
